@@ -1,8 +1,13 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import logo from './logo.svg';
 import './App.css';
+import { invoke } from '@tauri-apps/api/tauri';
+
 
 function App() {
+  useEffect(() => {
+    invoke('close_splashscreen');
+  });
   return (
     <div className="App">
       <header className="App-header">
