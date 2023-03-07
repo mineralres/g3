@@ -72,6 +72,7 @@ version = "0.1.0"
 dependencies = [
  "ctp-futures",
  "log",
+ "rust-share-util",
  "serde",
  "serde_json",
  "tauri",
@@ -547,7 +548,7 @@ dependencies = [
 [[package]]
 name = "ctp-futures"
 version = "0.1.0"
-source = "git+https://github.com/mineralres/rust-share?branch=main#7445d94d33fbe3a7fd74d2de7995d102ef1b593a"
+source = "git+https://github.com/mineralres/rust-share?branch=main#0be515bf2c624afa7c1508d8302993a1f1de198b"
 dependencies = [
  "Inflector",
  "bindgen",
@@ -2354,6 +2355,14 @@ name = "regex-syntax"
 version = "0.6.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "456c603be3e8d448b072f410900c09faf164fbce2d480456f50eea6e25f9c848"
+
+[[package]]
+name = "rust-share-util"
+version = "0.1.0"
+source = "git+https://github.com/mineralres/rust-share?branch=main#0be515bf2c624afa7c1508d8302993a1f1de198b"
+dependencies = [
+ "encoding",
+]
 
 [[package]]
 name = "rustc-hash"

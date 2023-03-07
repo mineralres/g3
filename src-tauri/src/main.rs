@@ -6,6 +6,10 @@
 use ctp_futures::trader_api::*;
 use log::info;
 use tauri::Manager;
+mod config;
+use config::*;
+use rust_share_util::*;
+use tokio::sync::Mutex;
 
 pub fn init_logger() {
     if std::env::var("RUST_LOG").is_err() {
@@ -23,12 +27,116 @@ async fn close_splashscreen(window: tauri::Window) {
     window.get_window("main").unwrap().show().unwrap();
 }
 
+struct Database {
+    conf: G3Config,
+}
+
+type StateTpye = Mutex<Database>;
+
+#[derive(serde::Serialize)]
+struct CustomResponse {
+    message: String,
+    other_val: usize,
+}
+
+async fn some_other_function() -> Option<String> {
+    Some("response".into())
+}
+
+#[tauri::command]
+async fn account_list(
+    window: tauri::Window,
+    database: tauri::State<'_, StateTpye>,
+) -> Result<Vec<TradingAccount>, String> {
+    Ok(database.lock().await.conf.accounts.clone())
+}
+
+#[tauri::command]
+async fn add_account(
+    window: tauri::Window,
+    account: TradingAccount,
+    db: tauri::State<'_, StateTpye>,
+) -> Result<(), String> {
+    info!("add account = {:?}", account);
+    let conf = &mut db.lock().await.conf;
+    conf.accounts.push(account);
+    conf.save(G3Config::default_path())
+        .map_err(|e| (e.to_string()))
+}
+
+#[tauri::command]
+async fn my_custom_command(
+    window: tauri::Window,
+    number: usize,
+    database: tauri::State<'_, StateTpye>,
+) -> Result<CustomResponse, String> {
+    println!("Called from {}", window.label());
+    let result: Option<String> = some_other_function().await;
+    if let Some(message) = result {
+        Ok(CustomResponse {
+            message,
+            other_val: 42 + number,
+        })
+    } else {
+        Err("No result".into())
+    }
+}
+// the payload type must implement `Serialize` and `Clone`.
+#[derive(Clone, serde::Serialize)]
+struct Payload {
+    message: String,
+}
+
 // Register the command:
 #[tokio::main]
 async fn main() {
     init_logger();
+    check_make_dir(".cache");
+    let g3conf = G3Config::load(G3Config::default_path()).unwrap_or(G3Config::default());
+    let db = Database { conf: g3conf };
+    let state = StateTpye::new(db);
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![close_splashscreen])
+        .manage(state)
+        .setup(|app| {
+            // listen to the `event-name` (emitted on any window)
+            let id = app.listen_global("event", |event| {
+                info!("got event-name with payload {:?}", event.payload());
+            });
+            // unlisten to the event using the `id` returned on the `listen_global` function
+            // an `once_global` API is also exposed on the `App` struct
+            // app.unlisten(id);
+
+            // emit the `event-name` event to all webview windows on the frontend
+            app.emit_all(
+                "event-name",
+                Payload {
+                    message: "Tauri is awesome!".into(),
+                },
+            )
+            .unwrap();
+            let main_window = app.get_window("main").unwrap();
+            tokio::spawn(async move {
+                loop {
+                    main_window
+                        .emit(
+                            "test-event",
+                            Payload {
+                                message: "Test event from rs!".into(),
+                            },
+                        )
+                        .unwrap();
+                    info!("emit test-event");
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                }
+            });
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            close_splashscreen,
+            my_custom_command,
+            account_list,
+            add_account
+        ])
         .run(tauri::generate_context!())
         .expect("failed to run app");
 }

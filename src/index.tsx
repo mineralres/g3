@@ -1,15 +1,45 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
-import App from './App';
 import reportWebVitals from './reportWebVitals';
+import {
+  createBrowserRouter,
+  RouterProvider,
+} from "react-router-dom";
+import ErrorPage from "./error-page";
+import Root from "./routes/root";
+import Account from "./routes/account";
+import Trading from "./routes/trading";
+import { invoke } from '@tauri-apps/api/tauri';
+
+const router = createBrowserRouter([
+  {
+    path: "/",
+    element: <Root />,
+    errorElement: <ErrorPage />,
+    children: [
+      {
+        path: "account",
+        element: <Account></Account>,
+      },
+      {
+        path: "trading",
+        element: <Trading></Trading>
+      },
+    ],
+  },
+]);
+
+document.addEventListener('DOMContentLoaded', () => {
+  invoke('close_splashscreen');
+})
 
 const root = ReactDOM.createRoot(
   document.getElementById('root') as HTMLElement
 );
 root.render(
   <React.StrictMode>
-    <App />
+    <RouterProvider router={router} />
   </React.StrictMode>
 );
 
