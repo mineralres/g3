@@ -52,13 +52,29 @@ async fn account_list(
 }
 
 #[tauri::command]
+async fn default_account(
+    window: tauri::Window,
+    database: tauri::State<'_, StateTpye>,
+) -> Result<TradingAccount, String> {
+    Ok(TradingAccount::default())
+}
+
+#[tauri::command]
 async fn add_account(
     window: tauri::Window,
     account: TradingAccount,
     db: tauri::State<'_, StateTpye>,
 ) -> Result<(), String> {
     info!("add account = {:?}", account);
+    if account.account.len() == 0 {
+        return Err("账号不能为空".to_string());
+    } else if account.broker_id.len() == 0 {
+        return Err("broker_id不能为空".to_string());
+    }
     let conf = &mut db.lock().await.conf;
+    if let Some(a) = conf.accounts.iter().find(|a| a.account == account.account) {
+        return Err("账号已存在".to_string());
+    }
     conf.accounts.push(account);
     conf.save(G3Config::default_path())
         .map_err(|e| (e.to_string()))
@@ -135,7 +151,8 @@ async fn main() {
             close_splashscreen,
             my_custom_command,
             account_list,
-            add_account
+            add_account,
+            default_account
         ])
         .run(tauri::generate_context!())
         .expect("failed to run app");
