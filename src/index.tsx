@@ -10,6 +10,7 @@ import ErrorPage from "./error-page";
 import Root from "./routes/root";
 import Account from "./routes/account";
 import Trading from "./routes/trading";
+import Log from "./routes/log";
 import { invoke } from '@tauri-apps/api/tauri';
 
 const router = createBrowserRouter([
@@ -25,6 +26,10 @@ const router = createBrowserRouter([
       {
         path: "trading",
         element: <Trading></Trading>
+      },
+      {
+        path: "log",
+        element: <Log></Log>
       },
     ],
   },

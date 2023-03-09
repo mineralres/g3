@@ -26,6 +26,11 @@ const items: MenuProps['items'] = [
 		icon: <SettingOutlined />,
 		children: [
 			{
+				label: <Link to={"log"}>日志</Link>,
+				key: 'log',
+				icon: <AppstoreOutlined />,
+			},
+			{
 				type: 'group',
 				label: 'Item 1',
 				children: [

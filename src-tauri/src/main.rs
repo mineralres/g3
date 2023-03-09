@@ -9,13 +9,13 @@ use tauri::Manager;
 mod config;
 use config::*;
 use rust_share_util::*;
+use std::io::Error;
 use tokio::sync::Mutex;
 
 pub fn init_logger() {
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var("RUST_LOG", "info")
     }
-    tracing_subscriber::fmt::init();
 }
 
 #[tauri::command]
@@ -103,10 +103,41 @@ struct Payload {
     message: String,
 }
 
+use std::io;
+use tracing_log::LogTracer;
+use tracing_subscriber::{fmt, subscribe::CollectExt, EnvFilter};
+
+struct MyWriter {}
+impl std::io::Write for MyWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let out_str = String::from_utf8_lossy(buf).to_string();
+        print!("{}", out_str);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 // Register the command:
 #[tokio::main]
 async fn main() {
-    init_logger();
+    LogTracer::init().unwrap();
+    let file_appender = tracing_appender::rolling::hourly(".cache", "example.log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+    let (non_blocking2, _guard) = tracing_appender::non_blocking(MyWriter {});
+
+    let collector = tracing_subscriber::registry()
+        .with(EnvFilter::from_default_env().add_directive(tracing::Level::TRACE.into()))
+        .with(fmt::Subscriber::new().with_writer(io::stdout))
+        .with(fmt::Subscriber::new().with_writer(non_blocking2))
+        .with(fmt::Subscriber::new().with_writer(non_blocking));
+    tracing::collect::set_global_default(collector).expect("Unable to set a global collector");
+
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "info")
+    }
+    tracing::info!("testttt");
     check_make_dir(".cache");
     let g3conf = G3Config::load(G3Config::default_path()).unwrap_or(G3Config::default());
     let db = Database { conf: g3conf };
