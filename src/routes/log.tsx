@@ -5,8 +5,6 @@ import { emit, listen, UnlistenFn } from '@tauri-apps/api/event';
 import { appWindow, WebviewWindow } from '@tauri-apps/api/window';
 import { FitAddon } from 'xterm-addon-fit';
 
-const fitAddon = new FitAddon();
-
 export default () => {
 	const divRef = useRef<HTMLDivElement>(null);;
 	const [term, setTerm] = useState(new Terminal({
@@ -16,8 +14,6 @@ export default () => {
 	}));
 
 	const initTerminal = () => {
-		const fitAddon = new FitAddon();
-		term.loadAddon(fitAddon);
 		if (divRef && divRef.current) {
 			console.log('ref', divRef.current);
 			if (divRef.current.firstChild) {
@@ -26,7 +22,6 @@ export default () => {
 			term.open(divRef.current);
 			const node = divRef.current;
 		}
-		fitAddon.fit();
 		// term.onKey(({ key, domEvent }) => {
 		// 	term.write(key);
 		// 	if (domEvent.keyCode === 13) {
@@ -37,11 +32,13 @@ export default () => {
 
 	useEffect(() => {
 		initTerminal();
+		const fitAddon = new FitAddon();
+		term.loadAddon(fitAddon);
+		fitAddon.fit();
 		async function test_listen() {
-			const unlisten = await appWindow.listen('test-event', (event: any) => {
+			const unlisten = await appWindow.listen('new-log-line', (event: any) => {
 				console.log('test-event ', event);
 				term.write(event.payload.message);
-				term.write('\r\n');
 			});
 			return unlisten;
 			// const unlisten = await listen('event', (event) => {
@@ -57,8 +54,8 @@ export default () => {
 	}, [divRef]);
 
 	return (
-		<div
-			style={{ margin: 10, width: '800', height: '90vh' }}
+		<div id="log"
+			style={{ margin: 1, width: '100%', height: '800' }}
 			ref={divRef}
 		/>
 

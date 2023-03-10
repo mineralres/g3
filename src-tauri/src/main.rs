@@ -104,14 +104,17 @@ struct Payload {
 }
 
 use std::io;
+use std::sync::mpsc::*;
 use tracing_log::LogTracer;
 use tracing_subscriber::{fmt, subscribe::CollectExt, EnvFilter};
 
-struct MyWriter {}
+struct MyWriter {
+    log_sender: std::sync::Mutex<Sender<String>>,
+}
 impl std::io::Write for MyWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let out_str = String::from_utf8_lossy(buf).to_string();
-        print!("{}", out_str);
+        self.log_sender.lock().unwrap().send(out_str).unwrap();
         Ok(buf.len())
     }
     fn flush(&mut self) -> std::io::Result<()> {
@@ -125,7 +128,10 @@ async fn main() {
     LogTracer::init().unwrap();
     let file_appender = tracing_appender::rolling::hourly(".cache", "example.log");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-    let (non_blocking2, _guard) = tracing_appender::non_blocking(MyWriter {});
+    let (log_sender, mut log_receiver) = channel();
+    let (non_blocking2, _guard) = tracing_appender::non_blocking(MyWriter {
+        log_sender: std::sync::Mutex::new(log_sender),
+    });
 
     let collector = tracing_subscriber::registry()
         .with(EnvFilter::from_default_env().add_directive(tracing::Level::TRACE.into()))
@@ -137,7 +143,6 @@ async fn main() {
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var("RUST_LOG", "info")
     }
-    tracing::info!("testttt");
     check_make_dir(".cache");
     let g3conf = G3Config::load(G3Config::default_path()).unwrap_or(G3Config::default());
     let db = Database { conf: g3conf };
@@ -149,10 +154,6 @@ async fn main() {
             let id = app.listen_global("event", |event| {
                 info!("got event-name with payload {:?}", event.payload());
             });
-            // unlisten to the event using the `id` returned on the `listen_global` function
-            // an `once_global` API is also exposed on the `App` struct
-            // app.unlisten(id);
-
             // emit the `event-name` event to all webview windows on the frontend
             app.emit_all(
                 "event-name",
@@ -161,19 +162,18 @@ async fn main() {
                 },
             )
             .unwrap();
-            let main_window = app.get_window("main").unwrap();
             tokio::spawn(async move {
                 loop {
-                    main_window
-                        .emit(
-                            "test-event",
-                            Payload {
-                                message: "Test event from rs!".into(),
-                            },
-                        )
-                        .unwrap();
-                    info!("emit test-event");
+                    info!("test log line");
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                }
+            });
+            let main_window = app.get_window("main").unwrap();
+            tokio::spawn(async move {
+                while let Ok(i) = log_receiver.recv() {
+                    main_window
+                        .emit("new-log-line", Payload { message: i })
+                        .unwrap();
                 }
             });
             Ok(())
@@ -185,6 +185,15 @@ async fn main() {
             add_account,
             default_account
         ])
+        .on_window_event(|event| match event.event() {
+            tauri::WindowEvent::CloseRequested { api, .. } => {
+                if event.window().label() == "log" {
+                    event.window().hide().unwrap();
+                    api.prevent_close();
+                }
+            }
+            _ => {}
+        })
         .run(tauri::generate_context!())
         .expect("failed to run app");
 }

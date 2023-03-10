@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react'
 import ReactDOM from 'react-dom/client';
 import './index.css';
 import reportWebVitals from './reportWebVitals';
@@ -12,6 +12,7 @@ import Account from "./routes/account";
 import Trading from "./routes/trading";
 import Log from "./routes/log";
 import { invoke } from '@tauri-apps/api/tauri';
+import { FloatButton, Modal } from 'antd';
 
 const router = createBrowserRouter([
   {
@@ -27,10 +28,6 @@ const router = createBrowserRouter([
         path: "trading",
         element: <Trading></Trading>
       },
-      {
-        path: "log",
-        element: <Log></Log>
-      },
     ],
   },
 ]);
@@ -42,10 +39,21 @@ document.addEventListener('DOMContentLoaded', () => {
 const root = ReactDOM.createRoot(
   document.getElementById('root') as HTMLElement
 );
+const RootA = () => {
+  const [showLog, setShowLog] = useState(false);
+  return (
+    <React.StrictMode>
+      <RouterProvider router={router} />
+      <FloatButton onClick={() => setShowLog(!showLog)}></FloatButton>
+      <Modal forceRender={true} footer={null} width={1200} onOk={() => setShowLog(false)} onCancel={() => setShowLog(false)} open={showLog}>
+        <h3>运行日志</h3>
+        <Log></Log>
+      </Modal>
+    </React.StrictMode>
+  )
+}
 root.render(
-  <React.StrictMode>
-    <RouterProvider router={router} />
-  </React.StrictMode>
+  <RootA></RootA>
 );
 
 // If you want to start measuring performance in your app, pass a function
