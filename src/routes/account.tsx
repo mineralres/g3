@@ -5,11 +5,15 @@ import { Outlet, Link, useNavigate } from "react-router-dom";
 const { Option } = Select;
 
 const AccountCard = (props: any) => {
-	const { account, broker_id } = props;
+	const { account, broker_id, trade_front } = props;
 	return <Card title={account} extra={<a href="#">More</a>} style={{ width: 300 }}>
-		<p>{account}</p>
-		<p>{broker_id}</p>
-		<Button>删除</Button>
+		<p>{broker_id}:{account}</p>
+		<p>{trade_front}</p>
+		<Button onClick={() => {
+			invoke('delete_account', { brokerId: broker_id, account }).then(res => {
+				console.log("删除账户", res);
+			});
+		}}>删除</Button>
 	</Card>
 }
 
@@ -58,7 +62,7 @@ export default () => {
 				console.log("添加新账户")
 				setIsAddOpen(true);
 			}}>添加新账户+</Button>
-			<Modal title="Basic Modal" footer={null} open={isAddOpen} onOk={() => { setIsAddOpen(false); }} onCancel={() => { setIsAddOpen(false) }}>
+			<Modal title="添加账户" footer={null} open={isAddOpen} onOk={() => { setIsAddOpen(false); }} onCancel={() => { setIsAddOpen(false) }}>
 				<Form
 					{...layout}
 					form={form}
@@ -66,13 +70,25 @@ export default () => {
 					onFinish={onFinish}
 					style={{ maxWidth: 600 }}
 				>
-					<Form.Item name="account" label="Account" rules={[{ required: true }]}>
-						<Input />
-					</Form.Item>
 					<Form.Item name="broker_id" label="BrokerID" rules={[{ required: true }]}>
 						<Input />
 					</Form.Item>
+					<Form.Item name="account" label="Account" rules={[{ required: true }]}>
+						<Input />
+					</Form.Item>
 					<Form.Item name="password" label="密码" rules={[{ required: true }]}>
+						<Input />
+					</Form.Item>
+					<Form.Item name="trade_front" label="交易服务器" rules={[{ required: true }]}>
+						<Input />
+					</Form.Item>
+					<Form.Item name="user_product_info" label="产品信息" rules={[{}]}>
+						<Input />
+					</Form.Item>
+					<Form.Item name="auth_code" label="授权码" rules={[{}]}>
+						<Input />
+					</Form.Item>
+					<Form.Item name="app_id" label="AppID" rules={[{}]}>
 						<Input />
 					</Form.Item>
 					<Form.Item {...tailLayout}>

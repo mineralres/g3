@@ -30,6 +30,7 @@ rust-share-util = { git = "https://github.com/mineralres/rust-share", branch = "
 tracing = { git = "https://github.com/tokio-rs/tracing", branch = "master", version = "0.2" }
 tracing-appender = { git = "https://github.com/tokio-rs/tracing", branch = "master", version = "*" }
 tracing-log = { git = "https://github.com/tokio-rs/tracing", branch = "master", version = "*" }
+futures = "0.3.5"
 
 [features]
 # by default Tauri runs in production mode
