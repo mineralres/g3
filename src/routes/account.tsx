@@ -1,31 +1,31 @@
 import { invoke } from '@tauri-apps/api/tauri';
-import { Card, Button, Modal, Form, Input, Select, Divider } from 'antd';
+import { Card, Button, Modal, Form, Input, Select, Divider, message } from 'antd';
 import React, { useState, useEffect } from 'react'
 import { Outlet, Link, useNavigate } from "react-router-dom";
 const { Option } = Select;
 
 const AccountCard = (props: any) => {
-	const { account, broker_id, trade_front } = props;
-	return <Card title={account} extra={<a href="#">More</a>} style={{ width: 300 }}>
-		<p>{broker_id}:{account}</p>
-		<p>{trade_front}</p>
-		<Button onClick={() => {
-			invoke('delete_account', { brokerId: broker_id, account }).then(res => {
-				console.log("删除账户", res);
-			});
-		}}>删除</Button>
-	</Card>
+	const { account, broker_id, trade_front, handleDelete } = props;
+	const [messageApi, contextHolder] = message.useMessage();
+	return <>
+		{contextHolder}
+		<Card title={account} extra={<a href="#">More</a>} style={{ width: 300 }}>
+			<p>{broker_id}:{account}</p>
+			<p>{trade_front}</p>
+			<Button onClick={() => {
+				handleDelete(broker_id, account);
+			}}>删除</Button>
+		</Card></>
 }
 
 export default () => {
+	const [messageApi, contextHolder] = message.useMessage();
 	const navigate = useNavigate();
 	const [accountList, setAccountList] = useState([]);
 	const [isAddOpen, setIsAddOpen] = useState(false);
 	const [form] = Form.useForm();
 	useEffect(() => {
-		console.log("account effect");
 		invoke('account_list').then(res => {
-			console.log('account list', res);
 			setAccountList(res as any);
 		});
 		invoke('default_account').then(res => {
@@ -34,10 +34,16 @@ export default () => {
 	}, []);
 	const onFinish = (values: any) => {
 		let account = form.getFieldsValue(true);
-		console.log('account', account);
 		invoke('add_account', { account }).then(res => {
-			console.log(res);
+			messageApi.info('添加成功');
+			invoke('account_list').then(res => {
+				setAccountList(res as any);
+			});
+		}).catch(err => {
+			console.log("add account err ", err)
+			messageApi.error(err);
 		});
+		setIsAddOpen(false);
 	};
 
 	const onReset = () => {
@@ -56,7 +62,17 @@ export default () => {
 
 	return (
 		<div>
-			{accountList.map((e: any, index) => <AccountCard key={index} {...e} > </AccountCard>)}
+			{contextHolder}
+			{accountList.map((e: any, index) => <AccountCard handleDelete={(broker_id: string, account: string) => {
+				invoke('delete_account', { brokerId: broker_id, account }).then(res => {
+					invoke('account_list').then(res => {
+						setAccountList(res as any);
+					});
+					messageApi.info('删除账户成功');
+				}).catch(err => {
+					messageApi.error(err);
+				});
+			}} key={index} {...e} > </AccountCard>)}
 			<Divider></Divider>
 			<Button onClick={() => {
 				console.log("添加新账户")

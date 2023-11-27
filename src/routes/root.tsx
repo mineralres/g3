@@ -50,7 +50,6 @@ const items: MenuProps['items'] = [
 
 export default () => {
 	const [current, setCurrent] = useState('account');
-	console.log("root");
 	useEffect(() => {
 		// async function test_listen() {
 		// 	appWindow.listen('test-event', (event: any) => {

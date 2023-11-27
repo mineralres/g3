@@ -1,15 +1,9 @@
-use std::{
-    env,
-    env::var,
-    fs::File,
-    io::Write,
-    path::{Path, PathBuf},
-};
+use std::{env, env::var, path::Path};
 fn main() {
     if cfg!(windows) {
         let key = "PATH";
         match env::var(key) {
-            Ok(val) => {
+            Ok(_val) => {
                 let output = var("OUT_DIR").unwrap();
                 let path = Path::new(&output).join("..").join("..").join("..");
                 println!("cargo:rustc-env=PATH={}", path.display());

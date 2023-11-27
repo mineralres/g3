@@ -9,13 +9,10 @@ export default () => {
 	const divRef = useRef<HTMLDivElement>(null);;
 	const [term, setTerm] = useState(new Terminal({
 		convertEol: true,
-		cursorBlink: true, // 光标闪烁
-		cursorStyle: "block" // 光标样式
 	}));
 
 	const initTerminal = () => {
 		if (divRef && divRef.current) {
-			console.log('ref', divRef.current);
 			if (divRef.current.firstChild) {
 				divRef.current.removeChild(divRef.current.firstChild);
 			}
@@ -37,7 +34,6 @@ export default () => {
 		fitAddon.fit();
 		async function test_listen() {
 			const unlisten = await appWindow.listen('new-log-line', (event: any) => {
-				console.log('test-event ', event);
 				term.write(event.payload.message);
 			});
 			return unlisten;

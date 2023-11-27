@@ -5,28 +5,30 @@ use futures::StreamExt;
 use log::info;
 use rust_share_util::*;
 use std::ffi::CString;
-use tokio::sync::mpsc::*;
+use std::sync::Arc;
 use tokio::sync::oneshot;
+use tokio::sync::Mutex;
 
 pub struct Trader {
     conf: TradingAccount,
-    api: Box<CThostFtdcTraderApi>,
-    exit_signal_receiver: tokio::sync::oneshot::Receiver<String>,
+    pub api: Box<CThostFtdcTraderApi>,
+    pub exit_sender: Option<tokio::sync::oneshot::Sender<String>>,
     request_id: i32,
 }
 
 impl Trader {
-    pub fn init(conf: TradingAccount, sink: Sender<(String, CThostFtdcTraderSpiOutput)>) -> Self {
+    pub fn init(conf: TradingAccount) -> Arc<Mutex<Self>> {
         let conf1 = conf.clone();
-        let (exit_sender, exit_receiver) = oneshot::channel::<String>();
+        let (exit_sender, mut exit_receiver) = oneshot::channel::<String>();
         let broker_id = conf.broker_id;
         let account = conf.account;
+        let ak = format!("{broker_id}:{account}");
         let fens_trade_front = conf.fens_trade_front.as_str();
         let trade_front = conf.trade_front.as_str();
-        let auth_code = conf.auth_code.as_str();
-        let user_product_info = conf.user_product_info.as_str();
-        let app_id = conf.app_id.as_str();
-        let password = conf.password.as_str();
+        let _auth_code = conf.auth_code.as_str();
+        let _user_product_info = conf.user_product_info.as_str();
+        let _app_id = conf.app_id.as_str();
+        let _password = conf.password.as_str();
         let flow_path = format!(".cache/ctp_futures_trade_flow_{}_{}//", broker_id, account);
         check_make_dir(&flow_path);
         let mut api = create_api(&flow_path, false);
@@ -44,27 +46,38 @@ impl Trader {
         api.subscribe_public_topic(ctp_futures::THOST_TE_RESUME_TYPE_THOST_TERT_QUICK);
         api.subscribe_private_topic(ctp_futures::THOST_TE_RESUME_TYPE_THOST_TERT_QUICK);
         api.init();
+        // let (api, mut api1) = trader_api::unsafe_clone_api(api);
         // 处理登陆初始化查询
-        info!("{} 初始化查询完成.", account);
-        tokio::spawn(async move {
-            let key = format!("{}:{}", broker_id, account);
-            while let Some(spimsg) = stream.next().await {
-                sink.send((key.clone(), spimsg)).await.unwrap();
-            }
-            exit_sender.send("exited".to_string()).unwrap();
-        });
-        Trader {
+        let trader = Trader {
             conf: conf1,
             api,
-            exit_signal_receiver: exit_receiver,
+            exit_sender: Some(exit_sender),
             request_id: 10,
-        }
-    }
-
-    pub async fn delete(self) {
-        // self.api.release();
-        // Box::leak(api);
-        self.exit_signal_receiver.await.unwrap();
+        };
+        let trader = Arc::new(Mutex::new(trader));
+        let t1 = Arc::clone(&trader);
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    msg = stream.next() => {
+                        if let Some(msg) = msg {
+                            let mut t1 = t1.lock().await;
+                            t1.handle_spi_msg(&msg);
+                        }
+                    }
+                    _ = &mut exit_receiver => {
+                        info!("[{ak}] exited on receiver, start to release api");
+                        let trader = Arc::into_inner(t1).unwrap();
+                        let mut trader = trader.into_inner();
+                        trader.api.release();
+                        Box::leak(trader.api);
+                        break;
+                    }
+                }
+            }
+            info!("[{ak}] exited loop");
+        });
+        trader
     }
 
     pub fn get_request_id(&mut self) -> i32 {
@@ -76,8 +89,8 @@ impl Trader {
         let conf = &self.conf;
         let broker_id = conf.broker_id.as_str();
         let account = conf.account.as_str();
-        let fens_trade_front = conf.fens_trade_front.as_str();
-        let trade_front = conf.trade_front.as_str();
+        let _fens_trade_front = conf.fens_trade_front.as_str();
+        let _trade_front = conf.trade_front.as_str();
         let auth_code = conf.auth_code.as_str();
         let user_product_info = conf.user_product_info.as_str();
         let app_id = conf.app_id.as_str();
@@ -97,7 +110,7 @@ impl Trader {
             }
             OnFrontDisconnected(p) => {
                 info!("on front disconnected {:?} 直接Exit ", p);
-                std::process::exit(-1);
+                return;
             }
             OnRspAuthenticate(ref p) => {
                 if p.p_rsp_info.as_ref().unwrap().ErrorID == 0 {
@@ -114,7 +127,7 @@ impl Trader {
             }
             OnRspUserLogin(ref p) => {
                 if p.p_rsp_info.as_ref().unwrap().ErrorID == 0 {
-                    let u = p.p_rsp_user_login.unwrap();
+                    let _u = p.p_rsp_user_login.unwrap();
                 } else {
                     info!("Trade RspUserLogin = {:?}", print_rsp_info!(&p.p_rsp_info));
                 }
@@ -161,8 +174,8 @@ impl Trader {
                 }
             }
             OnRspQryInvestorPositionDetail(ref detail) => {
-                if let Some(d) = detail.p_investor_position_detail {
-                    info!("d={:?}", d);
+                if let Some(_d) = detail.p_investor_position_detail {
+                    // info!("d={:?}", d);
                 }
                 if detail.b_is_last {
                     info!("查询持仓明细完成");
@@ -177,8 +190,8 @@ impl Trader {
                 }
             }
             OnRspQryInvestorPosition(ref p) => {
-                if let Some(p) = p.p_investor_position {
-                    info!("pos={:?}", p);
+                if let Some(_p) = p.p_investor_position {
+                    // info!("pos={:?}", p);
                 }
                 if p.b_is_last {
                     info!("查询持仓完成");
@@ -191,13 +204,7 @@ impl Trader {
                 }
             }
             OnRspQryInstrument(ref p) => {
-                if let Some(instrument) = p.p_instrument {
-                    info!(
-                        "inst=[{:?}:{:?}]",
-                        gb18030_cstr_to_str_i8(&instrument.ExchangeID),
-                        gb18030_cstr_to_str_i8(&instrument.InstrumentID)
-                    );
-                }
+                if let Some(_instrument) = p.p_instrument {}
                 if p.b_is_last {
                     // 查询行情
                     info!("查询合约完成");
@@ -239,7 +246,7 @@ impl Trader {
                 }
             }
             OnRspQryTrade(ref p) => {
-                if let Some(trade) = p.p_trade {}
+                if let Some(_trade) = p.p_trade {}
                 if p.b_is_last {
                     info!("查询成交明细完成 l={}", 0);
                 }
@@ -247,7 +254,7 @@ impl Trader {
             OnRspQryInstrumentCommissionRate(ref p) => {
                 // 未处理
                 if p.p_instrument_commission_rate.is_some() {
-                    let cr = p.p_instrument_commission_rate.unwrap();
+                    let _cr = p.p_instrument_commission_rate.unwrap();
                 }
                 if p.b_is_last {}
             }

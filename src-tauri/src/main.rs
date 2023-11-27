@@ -3,17 +3,16 @@
     windows_subsystem = "windows"
 )]
 
-use ctp_futures::trader_api::*;
 use log::{error, info};
 use tauri::Manager;
 mod config;
 use config::*;
 use rust_share_util::*;
-use std::io::Error;
 use tokio::sync::Mutex;
 mod trader;
 use std::io;
 use std::sync::mpsc::*;
+use std::sync::Arc;
 use tracing_log::LogTracer;
 use tracing_subscriber::{fmt, subscribe::CollectExt, EnvFilter};
 use trader::*;
@@ -29,18 +28,17 @@ async fn close_splashscreen(
     }
     window.get_window("main").unwrap().show().unwrap();
     info!("Sync traders on start");
-    database.lock().await.sync_traders();
+    database.lock().await.sync_traders().await;
     Ok(())
 }
 
 struct Database {
     conf: G3Config,
-    traders: std::collections::HashMap<String, Trader>,
-    sink_sender: tokio::sync::mpsc::Sender<(String, CThostFtdcTraderSpiOutput)>,
+    traders: std::collections::HashMap<String, Arc<Mutex<Trader>>>,
 }
 
 impl Database {
-    pub fn sync_traders(&mut self) {
+    pub async fn sync_traders(&mut self) {
         for ta in self.conf.accounts.iter().filter(|ta| {
             if ta.account.len() == 0 {
                 error!("[{}:{}] account不能为空", ta.broker_id, ta.account);
@@ -54,25 +52,35 @@ impl Database {
         }) {
             let key = format!("{}:{}", ta.broker_id, ta.account);
             if !self.traders.contains_key(&key) {
-                let sink = self.sink_sender.clone();
-                let trader = trader::Trader::init(ta.clone(), sink);
+                let trader = trader::Trader::init(ta.clone());
+                self.traders.insert(key, trader);
+            }
+        }
+        let delete_list = self
+            .traders
+            .iter()
+            .filter(|(k, _v)| {
+                self.conf
+                    .accounts
+                    .iter()
+                    .find(|ta| format!("{}:{}", ta.broker_id, ta.account) == **k)
+                    .is_none()
+            })
+            .map(|(k, _v)| k.clone())
+            .collect::<Vec<_>>();
+        for k in delete_list.iter() {
+            if let Some(trader) = self.traders.remove(k) {
+                if let Some(sender) = trader.lock().await.exit_sender.take() {
+                    sender.send("exit".to_string()).unwrap();
+                }
             }
         }
     }
     pub fn new(g3conf: G3Config) -> Self {
-        let (sink_sender, mut sink_receiver) = tokio::sync::mpsc::channel(1000);
         let db = Database {
             conf: g3conf,
             traders: std::collections::HashMap::new(),
-            sink_sender,
         };
-        tokio::spawn(async move {
-            info!("start receive spi message");
-            while let Some((key, message)) = sink_receiver.recv().await {
-                info!("[{}] GOT = {:?}", key, message);
-            }
-            info!("exit receive spi message");
-        });
         db
     }
 }
@@ -91,7 +99,7 @@ async fn some_other_function() -> Option<String> {
 
 #[tauri::command]
 async fn account_list(
-    window: tauri::Window,
+    _window: tauri::Window,
     database: tauri::State<'_, StateTpye>,
 ) -> Result<Vec<TradingAccount>, String> {
     Ok(database.lock().await.conf.accounts.clone())
@@ -99,15 +107,15 @@ async fn account_list(
 
 #[tauri::command]
 async fn default_account(
-    window: tauri::Window,
-    database: tauri::State<'_, StateTpye>,
+    _window: tauri::Window,
+    _database: tauri::State<'_, StateTpye>,
 ) -> Result<TradingAccount, String> {
     Ok(TradingAccount::default())
 }
 
 #[tauri::command]
 async fn add_account(
-    window: tauri::Window,
+    _window: tauri::Window,
     account: TradingAccount,
     db: tauri::State<'_, StateTpye>,
 ) -> Result<(), String> {
@@ -120,19 +128,23 @@ async fn add_account(
     let mut db = db.lock().await;
     {
         let conf = &mut db.conf;
-        if let Some(a) = conf.accounts.iter().find(|a| a.account == account.account) {
+        if let Some(_a) = conf.accounts.iter().find(|a| a.account == account.account) {
+            error!(
+                "账户[{}:{}]不能重复添加",
+                account.broker_id, account.account
+            );
             return Err("账号已存在".to_string());
         }
         conf.accounts.push(account);
         conf.save(G3Config::default_path()).unwrap();
     }
-    db.sync_traders();
+    db.sync_traders().await;
     Ok(())
 }
 
 #[tauri::command]
 async fn delete_account(
-    window: tauri::Window,
+    _window: tauri::Window,
     broker_id: String,
     account: String,
     db: tauri::State<'_, StateTpye>,
@@ -145,7 +157,7 @@ async fn delete_account(
             .retain(|ta| !(ta.account == account && ta.broker_id == broker_id));
         conf.save(G3Config::default_path()).unwrap();
     }
-    db.sync_traders();
+    db.sync_traders().await;
     Ok(())
 }
 
@@ -153,7 +165,7 @@ async fn delete_account(
 async fn my_custom_command(
     window: tauri::Window,
     number: usize,
-    database: tauri::State<'_, StateTpye>,
+    _database: tauri::State<'_, StateTpye>,
 ) -> Result<CustomResponse, String> {
     println!("Called from {}", window.label());
     let result: Option<String> = some_other_function().await;
@@ -215,7 +227,7 @@ async fn main() {
         .manage(state)
         .setup(|app| {
             // listen to the `event-name` (emitted on any window)
-            let id = app.listen_global("event", |event| {
+            let _id = app.listen_global("event", |event| {
                 info!("got event-name with payload {:?}", event.payload());
             });
             // emit the `event-name` event to all webview windows on the frontend
