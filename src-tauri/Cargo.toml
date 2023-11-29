@@ -31,6 +31,8 @@ tracing = { git = "https://github.com/tokio-rs/tracing", branch = "master", vers
 tracing-appender = { git = "https://github.com/tokio-rs/tracing", branch = "master", version = "*" }
 tracing-log = { git = "https://github.com/tokio-rs/tracing", branch = "master", version = "*" }
 futures = "0.3.5"
+bincode = { version = "2.0.0-rc.2", features = ["derive"] }
+itertools = "0.12"
 
 [features]
 # by default Tauri runs in production mode

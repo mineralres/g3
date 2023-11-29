@@ -10,6 +10,7 @@ import ErrorPage from "./error-page";
 import Root from "./routes/root";
 import Account from "./routes/account";
 import Trading from "./routes/trading";
+import Order from "./routes/order";
 import Log from "./routes/log";
 import { invoke } from '@tauri-apps/api/tauri';
 import { FloatButton, Modal } from 'antd';
@@ -21,12 +22,24 @@ const router = createBrowserRouter([
     errorElement: <ErrorPage />,
     children: [
       {
+        path: "/",
+        element: <Account></Account>,
+      },
+      {
+        path: "order",
+        element: <Order></Order>,
+      },
+      {
         path: "account",
         element: <Account></Account>,
       },
       {
         path: "trading",
         element: <Trading></Trading>
+      },
+      {
+        path: "log",
+        element: <Account></Account>,
       },
     ],
   },

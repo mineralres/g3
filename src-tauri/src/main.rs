@@ -10,6 +10,7 @@ use config::*;
 use rust_share_util::*;
 use tokio::sync::Mutex;
 mod trader;
+use itertools::*;
 use std::io;
 use std::sync::mpsc::*;
 use std::sync::Arc;
@@ -34,7 +35,12 @@ async fn close_splashscreen(
 
 struct Database {
     conf: G3Config,
-    traders: std::collections::HashMap<String, Arc<Mutex<Trader>>>,
+    pub traders: std::collections::HashMap<String, Arc<Mutex<Trader>>>,
+    cta_event_sender: tokio::sync::mpsc::Sender<CtaEvent>,
+}
+
+fn ta_key(broker_id: &str, account: &str) -> String {
+    format!("{broker_id}:{account}")
 }
 
 impl Database {
@@ -52,7 +58,7 @@ impl Database {
         }) {
             let key = format!("{}:{}", ta.broker_id, ta.account);
             if !self.traders.contains_key(&key) {
-                let trader = trader::Trader::init(ta.clone());
+                let trader = trader::Trader::init(ta.clone(), self.cta_event_sender.clone());
                 self.traders.insert(key, trader);
             }
         }
@@ -76,12 +82,59 @@ impl Database {
             }
         }
     }
-    pub fn new(g3conf: G3Config) -> Self {
+    pub fn new(g3conf: G3Config, cta_es: tokio::sync::mpsc::Sender<CtaEvent>) -> Self {
         let db = Database {
             conf: g3conf,
             traders: std::collections::HashMap::new(),
+            cta_event_sender: cta_es,
         };
         db
+    }
+
+    pub async fn order_rows(&self) -> Vec<OrderRow> {
+        let mut v = vec![];
+        for (_, t) in self.traders.iter() {
+            let t = t.lock().await;
+            for (_, o) in t.cta.orders.iter() {
+                v.push(o.clone());
+            }
+        }
+        v
+    }
+
+    pub async fn get_order_row(
+        &self,
+        broker_id: &str,
+        account: &str,
+        key: &str,
+    ) -> Option<OrderRow> {
+        if let Some(t) = self.traders.get(&ta_key(broker_id, account)) {
+            t.lock().await.cta.orders.get(key).cloned()
+        } else {
+            None
+        }
+    }
+
+    pub async fn account_rows(&self) -> Vec<TradingAccountRow> {
+        let mut v = self
+            .conf
+            .accounts
+            .iter()
+            .map(|a| {
+                let mut row = TradingAccountRow::default();
+                row.broker_id = a.broker_id.clone();
+                row.account = a.account.clone();
+                row
+            })
+            .collect_vec();
+        for row in v.iter_mut() {
+            if let Some(trader) = self.traders.get(&ta_key(&row.broker_id, &row.account)) {
+                let trader = trader.lock().await;
+                row.status = trader.status();
+                row.status_description = trader.status_description();
+            }
+        }
+        v
     }
 }
 
@@ -101,8 +154,32 @@ async fn some_other_function() -> Option<String> {
 async fn account_list(
     _window: tauri::Window,
     database: tauri::State<'_, StateTpye>,
-) -> Result<Vec<TradingAccount>, String> {
-    Ok(database.lock().await.conf.accounts.clone())
+) -> Result<Vec<TradingAccountRow>, String> {
+    let v = database.lock().await.account_rows().await;
+    Ok(v)
+}
+
+#[tauri::command]
+async fn order_rows(
+    _window: tauri::Window,
+    database: tauri::State<'_, StateTpye>,
+) -> Result<Vec<OrderRow>, String> {
+    Ok(database.lock().await.order_rows().await)
+}
+
+#[tauri::command]
+async fn get_order_row(
+    _window: tauri::Window,
+    broker_id: String,
+    account: String,
+    key: String,
+    database: tauri::State<'_, StateTpye>,
+) -> Result<Option<OrderRow>, String> {
+    Ok(database
+        .lock()
+        .await
+        .get_order_row(&broker_id, &account, &key)
+        .await)
 }
 
 #[tauri::command]
@@ -221,7 +298,8 @@ async fn main() {
     }
     check_make_dir(".cache");
     let g3conf = G3Config::load(G3Config::default_path()).unwrap_or(G3Config::default());
-    let db = Database::new(g3conf);
+    let (cta_es, mut cta_er) = tokio::sync::mpsc::channel(1000);
+    let db = Database::new(g3conf, cta_es);
     let state = StateTpye::new(db);
     tauri::Builder::default()
         .manage(state)
@@ -247,6 +325,12 @@ async fn main() {
                         .unwrap();
                 }
             });
+            let main_window = app.get_window("main").unwrap();
+            tokio::spawn(async move {
+                while let Some(e) = cta_er.recv().await {
+                    main_window.emit("cta-event", e).unwrap();
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -255,7 +339,9 @@ async fn main() {
             account_list,
             add_account,
             default_account,
-            delete_account
+            delete_account,
+            order_rows,
+            get_order_row
         ])
         .on_window_event(|event| match event.event() {
             tauri::WindowEvent::CloseRequested { api, .. } => {

@@ -1,21 +1,57 @@
 import { invoke } from '@tauri-apps/api/tauri';
-import { Card, Button, Modal, Form, Input, Select, Divider, message } from 'antd';
+import { Card, Button, Modal, Form, Input, Select, Divider, message, Badge } from 'antd';
 import React, { useState, useEffect } from 'react'
 import { Outlet, Link, useNavigate } from "react-router-dom";
+import { emit, listen } from '@tauri-apps/api/event';
+import { appWindow, WebviewWindow } from '@tauri-apps/api/window';
+import { ExclamationCircleFilled, } from '@ant-design/icons';
+import "./account.css";
+
 const { Option } = Select;
+const { confirm } = Modal;
 
 const AccountCard = (props: any) => {
-	const { account, broker_id, trade_front, handleDelete } = props;
+	const { account, broker_id, equity, status, status_description, handleDelete } = props;
 	const [messageApi, contextHolder] = message.useMessage();
-	return <>
-		{contextHolder}
-		<Card title={account} extra={<a href="#">More</a>} style={{ width: 300 }}>
-			<p>{broker_id}:{account}</p>
-			<p>{trade_front}</p>
-			<Button onClick={() => {
-				handleDelete(broker_id, account);
-			}}>删除</Button>
-		</Card></>
+	const i_badge = (status: String) => {
+		if (status === "UnKown") {
+			return <Badge status='default' text='未连接'></Badge>;
+		} else if (status == "Connected") {
+			return <Badge status='success' text='已连接'></Badge>;
+		} else if (status == "Disconnected") {
+			return <Badge status='error' text='已断开'></Badge>;
+		} else if (status == "AuthenticateFailed") {
+			return <Badge status='error' text='认证失败'></Badge>;
+		} else if (status == "AuthenticateSucceeded") {
+			return <Badge status='success' text='认证成功'></Badge>;
+		} else if (status == "LoginFailed") {
+			return <Badge status='error' text={`登陆失败(${status_description})`}></Badge>;
+		} else if (status == "LoginSucceeded") {
+			return <Badge status='success' text='登陆成功'></Badge>;
+		}
+		return <Badge status='default' text='未连接'></Badge>;
+	}
+
+	return <tr>
+		<td>{broker_id}</td>
+		<td>{account}</td>
+		<td>{equity}</td>
+		<td>{i_badge(status)}</td>
+		<td><Button type="link" onClick={() => {
+			let title = "确认删除?";
+			confirm({
+				title,
+				icon: <ExclamationCircleFilled />,
+				content: '删除账户',
+				onOk() {
+					handleDelete(broker_id, account);
+				},
+				onCancel() {
+				},
+			});
+		}}>删除</Button></td>
+
+	</tr>
 }
 
 export default () => {
@@ -26,11 +62,33 @@ export default () => {
 	const [form] = Form.useForm();
 	useEffect(() => {
 		invoke('account_list').then(res => {
+			console.log('account list', res);
 			setAccountList(res as any);
 		});
 		invoke('default_account').then(res => {
 			form.setFieldsValue(res);
 		});
+		async function test_listen() {
+			const unlisten = await listen('add-new-account', (event: any) => {
+				console.log('on add-new-account');
+				if (!isAddOpen) {
+					setIsAddOpen(true);
+				}
+				setIsAddOpen(true);
+			});
+			const unlisten2 = await listen('cta-event', (event: any) => {
+				console.log('account window: cta-event', event);
+				invoke('account_list').then(res => {
+					setAccountList(res as any);
+				});
+			});
+
+			return [unlisten, unlisten2];
+		}
+		const unlisten = test_listen();
+		return () => {
+			unlisten.then((ul) => ul.forEach((uf) => uf()));
+		}
 	}, []);
 	const onFinish = (values: any) => {
 		let account = form.getFieldsValue(true);
@@ -63,21 +121,33 @@ export default () => {
 	return (
 		<div>
 			{contextHolder}
-			{accountList.map((e: any, index) => <AccountCard handleDelete={(broker_id: string, account: string) => {
-				invoke('delete_account', { brokerId: broker_id, account }).then(res => {
-					invoke('account_list').then(res => {
-						setAccountList(res as any);
+			<table id="customers" style={{ width: '100%' }}>
+				<colgroup>
+					<col span={1} style={{ width: '10%' }}></col>
+					<col span={1} style={{ width: '10%' }}></col>
+					<col span={1} style={{ width: '10%' }}></col>
+					<col span={1} style={{ width: '20%' }}></col>
+					<col span={1} style={{ width: '50%' }}></col>
+				</colgroup>
+				<tr>
+					<th>BrokerId</th>
+					<th>账号</th>
+					<th>权益</th>
+					<th>状态</th>
+					<th>操作</th>
+				</tr>
+				{accountList.map((e: any, index) => <AccountCard handleDelete={(broker_id: string, account: string) => {
+					invoke('delete_account', { brokerId: broker_id, account }).then(res => {
+						invoke('account_list').then(res => {
+							console.log('account list', res);
+							setAccountList(res as any);
+						});
+						messageApi.info('删除账户成功');
+					}).catch(err => {
+						messageApi.error(err);
 					});
-					messageApi.info('删除账户成功');
-				}).catch(err => {
-					messageApi.error(err);
-				});
-			}} key={index} {...e} > </AccountCard>)}
-			<Divider></Divider>
-			<Button onClick={() => {
-				console.log("添加新账户")
-				setIsAddOpen(true);
-			}}>添加新账户+</Button>
+				}} key={index} {...e} > </AccountCard>)}
+			</table>
 			<Modal title="添加账户" footer={null} open={isAddOpen} onOk={() => { setIsAddOpen(false); }} onCancel={() => { setIsAddOpen(false) }}>
 				<Form
 					{...layout}

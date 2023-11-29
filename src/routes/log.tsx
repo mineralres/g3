@@ -19,12 +19,6 @@ export default () => {
 			term.open(divRef.current);
 			const node = divRef.current;
 		}
-		// term.onKey(({ key, domEvent }) => {
-		// 	term.write(key);
-		// 	if (domEvent.keyCode === 13) {
-		// 		term.write("\r\n");
-		// 	}
-		// });
 	};
 
 	useEffect(() => {
@@ -37,11 +31,6 @@ export default () => {
 				term.write(event.payload.message);
 			});
 			return unlisten;
-			// const unlisten = await listen('event', (event) => {
-			// 	// event.event is the event name (useful if you want to use a single callback fn for multiple event types)
-			// 	// event.payload is the payload object
-			// 	console.log('handle ', event);
-			// })
 		}
 		const unlisten = test_listen();
 		return () => {

@@ -1,23 +1,62 @@
 use crate::config::*;
+use bincode::{Decode, Encode};
 use ctp_futures::trader_api::*;
 use ctp_futures::*;
 use futures::StreamExt;
-use log::info;
+use log::{info, warn};
 use rust_share_util::*;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::ffi::CString;
 use std::sync::Arc;
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
 
+#[derive(Decode, Encode, Debug, Clone, Serialize, Deserialize)]
+pub enum CtaStatus {
+    UnKown,
+    Connected,
+    Disconnected,
+    AuthenticateFailed,
+    AuthenticateSucceeded,
+    LoginFailed,
+    LoginSucceeded,
+}
+
+impl Default for CtaStatus {
+    fn default() -> Self {
+        CtaStatus::UnKown
+    }
+}
+
+#[derive(Decode, Encode, Debug, Clone, Serialize, Deserialize)]
+pub struct CtaEvent {
+    tp: String,
+    b: String,
+    a: String,
+    key: String,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CtpTradingAccount {
+    pub ta: CThostFtdcTradingAccountField,
+    pub status: CtaStatus,
+    pub status_description: String,
+    pub orders: HashMap<String, OrderRow>,
+    pub trades: HashMap<String, TradeRow>,
+}
+
 pub struct Trader {
-    conf: TradingAccount,
+    pub conf: TradingAccount,
+    pub cta: CtpTradingAccount,
     pub api: Box<CThostFtdcTraderApi>,
     pub exit_sender: Option<tokio::sync::oneshot::Sender<String>>,
+    pub event_sender: tokio::sync::mpsc::Sender<CtaEvent>,
     request_id: i32,
 }
 
 impl Trader {
-    pub fn init(conf: TradingAccount) -> Arc<Mutex<Self>> {
+    pub fn init(conf: TradingAccount, es: tokio::sync::mpsc::Sender<CtaEvent>) -> Arc<Mutex<Self>> {
         let conf1 = conf.clone();
         let (exit_sender, mut exit_receiver) = oneshot::channel::<String>();
         let broker_id = conf.broker_id;
@@ -48,11 +87,14 @@ impl Trader {
         api.init();
         // let (api, mut api1) = trader_api::unsafe_clone_api(api);
         // 处理登陆初始化查询
+        let cta = CtpTradingAccount::default();
         let trader = Trader {
             conf: conf1,
+            cta,
             api,
             exit_sender: Some(exit_sender),
             request_id: 10,
+            event_sender: es,
         };
         let trader = Arc::new(Mutex::new(trader));
         let t1 = Arc::clone(&trader);
@@ -62,7 +104,7 @@ impl Trader {
                     msg = stream.next() => {
                         if let Some(msg) = msg {
                             let mut t1 = t1.lock().await;
-                            t1.handle_spi_msg(&msg);
+                            t1.handle_spi_msg(&msg).await;
                         }
                     }
                     _ = &mut exit_receiver => {
@@ -80,12 +122,33 @@ impl Trader {
         trader
     }
 
-    pub fn get_request_id(&mut self) -> i32 {
+    fn key(&self) -> String {
+        format!("{}:{}", self.conf.broker_id, self.conf.account)
+    }
+
+    fn get_request_id(&mut self) -> i32 {
         self.request_id += 1;
         self.request_id
     }
 
-    pub fn handle_spi_msg(&mut self, spi_msg: &CThostFtdcTraderSpiOutput) {
+    pub fn status(&self) -> CtaStatus {
+        self.cta.status.clone()
+    }
+
+    pub fn status_description(&self) -> String {
+        self.cta.status_description.clone()
+    }
+
+    fn make_event(&self, tp: &str, key: &str) -> CtaEvent {
+        CtaEvent {
+            tp: tp.to_string(),
+            b: self.conf.broker_id.clone(),
+            a: self.conf.account.clone(),
+            key: key.to_string(),
+        }
+    }
+
+    async fn handle_spi_msg(&mut self, spi_msg: &CThostFtdcTraderSpiOutput) {
         let conf = &self.conf;
         let broker_id = conf.broker_id.as_str();
         let account = conf.account.as_str();
@@ -106,10 +169,21 @@ impl Trader {
                 set_cstr_from_str_truncate_i8(&mut req.AppID, app_id);
                 let request_id = self.get_request_id();
                 self.api.req_authenticate(&mut req, request_id);
-                info!("OnFrontConnected");
+                info!("{} OnFrontConnected", self.key());
+                self.cta.status = CtaStatus::Connected;
+                self.event_sender
+                    .send(self.make_event("OnFrontConnected", ""))
+                    .await
+                    .unwrap();
             }
             OnFrontDisconnected(p) => {
-                info!("on front disconnected {:?} 直接Exit ", p);
+                info!("{} on front disconnected {:?} 直接Exit ", self.key(), p);
+                self.cta.status = CtaStatus::Disconnected;
+                self.event_sender
+                    .send(self.make_event("OnFrontDisconnected", ""))
+                    .await
+                    .unwrap();
+
                 return;
             }
             OnRspAuthenticate(ref p) => {
@@ -120,24 +194,53 @@ impl Trader {
                     set_cstr_from_str_truncate_i8(&mut req.Password, password);
                     let request_id = self.get_request_id();
                     self.api.req_user_login(&mut req, request_id);
+                    self.cta.status = CtaStatus::AuthenticateSucceeded;
+                    self.event_sender
+                        .send(self.make_event("OnRspAuthenticate", ""))
+                        .await
+                        .unwrap();
                 } else {
-                    info!("RspAuthenticate={:?}", p);
-                    std::process::exit(-1);
+                    info!("{} RspAuthenticate={:?}", self.key(), p);
+                    self.cta.status = CtaStatus::AuthenticateFailed;
+                    if let Some(p) = p.p_rsp_info {
+                        self.cta.status_description =
+                            gb18030_cstr_to_str_i8(&p.ErrorMsg).to_string();
+                    }
+                    self.event_sender
+                        .send(self.make_event("OnRspAuthenticate", ""))
+                        .await
+                        .unwrap();
+                    return;
                 }
             }
             OnRspUserLogin(ref p) => {
                 if p.p_rsp_info.as_ref().unwrap().ErrorID == 0 {
                     let _u = p.p_rsp_user_login.unwrap();
+                    self.cta.status = CtaStatus::LoginSucceeded;
                 } else {
-                    info!("Trade RspUserLogin = {:?}", print_rsp_info!(&p.p_rsp_info));
+                    self.cta.status = CtaStatus::LoginFailed;
+                    if let Some(p) = p.p_rsp_info {
+                        self.cta.status_description =
+                            gb18030_cstr_to_str_i8(&p.ErrorMsg).to_string();
+                        warn!(
+                            "{} Trade RspUserLogin ErrorID={} ErrorMsg={}",
+                            self.key(),
+                            p.ErrorID,
+                            gb18030_cstr_to_str_i8(&p.ErrorMsg)
+                        );
+                    }
                 }
+                self.event_sender
+                    .send(self.make_event("OnRspUserLogin", ""))
+                    .await
+                    .unwrap();
                 let mut req = CThostFtdcSettlementInfoConfirmField::default();
                 set_cstr_from_str_truncate_i8(&mut req.BrokerID, broker_id);
                 set_cstr_from_str_truncate_i8(&mut req.InvestorID, account);
                 let request_id = self.get_request_id();
                 let result = self.api.req_settlement_info_confirm(&mut req, request_id);
                 if result != 0 {
-                    info!("ReqSettlementInfoConfirm={}", result);
+                    info!("{} ReqSettlementInfoConfirm={}", self.key(), result);
                 }
             }
             OnRspSettlementInfoConfirm(ref _p) => {
@@ -147,13 +250,14 @@ impl Trader {
                 let request_id = self.get_request_id();
                 let result = self.api.req_qry_trading_account(&mut req, request_id);
                 if result != 0 {
-                    info!("ReqQueryTradingAccount={}", result);
+                    info!("{} ReqQueryTradingAccount={}", self.key(), result);
                 }
             }
             OnRspQryTradingAccount(ref p) => {
                 if let Some(taf) = p.p_trading_account {
                     info!(
-                        "查询账户资金完成.  account={} trading_day={:?} balance={}",
+                        "{} 查询账户资金完成.  account={} trading_day={:?} balance={}",
+                        self.key(),
                         gb18030_cstr_to_str_i8(&taf.AccountID),
                         gb18030_cstr_to_str_i8(&taf.TradingDay),
                         taf.Balance
@@ -169,7 +273,7 @@ impl Trader {
                         .api
                         .req_qry_investor_position_detail(&mut req, request_id);
                     if result != 0 {
-                        info!("ReqQryInvestorPositionDetail = {:?}", result);
+                        info!("{} ReqQryInvestorPositionDetail = {:?}", self.key(), result);
                     }
                 }
             }
@@ -178,14 +282,14 @@ impl Trader {
                     // info!("d={:?}", d);
                 }
                 if detail.b_is_last {
-                    info!("查询持仓明细完成");
+                    info!("{} 查询持仓明细完成", self.key());
                     let mut req = CThostFtdcQryInvestorPositionField::default();
                     set_cstr_from_str_truncate_i8(&mut req.BrokerID, broker_id);
                     set_cstr_from_str_truncate_i8(&mut req.InvestorID, account);
                     let request_id = self.get_request_id();
                     let result = self.api.req_qry_investor_position(&mut req, request_id);
                     if result != 0 {
-                        info!("ReqQueryPosition={}", result);
+                        info!("{} ReqQueryPosition={}", self.key(), result);
                     }
                 }
             }
@@ -194,12 +298,12 @@ impl Trader {
                     // info!("pos={:?}", p);
                 }
                 if p.b_is_last {
-                    info!("查询持仓完成");
+                    info!("{} 查询持仓完成", self.key());
                     let mut req = CThostFtdcQryInstrumentField::default();
                     let request_id = self.get_request_id();
                     let result = self.api.req_qry_instrument(&mut req, request_id);
                     if result != 0 {
-                        info!("ReqQryInstrument = {:?}", result);
+                        info!("{} ReqQryInstrument = {:?}", self.key(), result);
                     }
                 }
             }
@@ -207,48 +311,55 @@ impl Trader {
                 if let Some(_instrument) = p.p_instrument {}
                 if p.b_is_last {
                     // 查询行情
-                    info!("查询合约完成");
+                    info!("{} 查询合约完成", self.key());
                     let mut req = CThostFtdcQryDepthMarketDataField::default();
                     let request_id = self.get_request_id();
                     let result = self.api.req_qry_depth_market_data(&mut req, request_id);
                     if result != 0 {
-                        info!("ReqQryDepthMarketData= {:?}", result);
+                        info!("{} ReqQryDepthMarketData= {:?}", self.key(), result);
                     }
                 }
             }
             OnRspQryDepthMarketData(ref p) => {
                 if p.p_depth_market_data.is_some() {}
                 if p.b_is_last {
-                    info!("查询行情完成 l={}", 0);
+                    info!("{} 查询行情完成 l={}", self.key(), 0);
                     let mut req = CThostFtdcQryOrderField::default();
                     set_cstr_from_str_truncate_i8(&mut req.BrokerID, broker_id);
                     set_cstr_from_str_truncate_i8(&mut req.InvestorID, account);
                     let request_id = self.get_request_id();
                     let result = self.api.req_qry_order(&mut req, request_id);
                     if result != 0 {
-                        info!("ReqQryOrder = {:?}", result);
+                        info!("{} ReqQryOrder = {:?}", result, self.key());
                     }
                 }
             }
             OnRspQryOrder(ref p) => {
-                if p.p_order.is_some() {}
+                if let Some(o) = &p.p_order {
+                    let o = OrderRow::from(o);
+                    self.cta.orders.insert(o.key(), o);
+                }
 
                 if p.b_is_last {
-                    info!("查询委托完成 l={}", 0);
+                    info!("{} 查询委托完成 l={}", self.key(), self.cta.orders.len());
                     let mut req = CThostFtdcQryTradeField::default();
                     set_cstr_from_str_truncate_i8(&mut req.BrokerID, broker_id);
                     set_cstr_from_str_truncate_i8(&mut req.InvestorID, account);
                     let request_id = self.get_request_id();
                     let result = self.api.req_qry_trade(&mut req, request_id);
                     if result != 0 {
-                        info!("ReqQryTrade = {:?}", result);
+                        info!("{} ReqQryTrade = {:?}", self.key(), result);
                     }
                 }
             }
             OnRspQryTrade(ref p) => {
                 if let Some(_trade) = p.p_trade {}
                 if p.b_is_last {
-                    info!("查询成交明细完成 l={}", 0);
+                    info!("{} 查询成交明细完成 l={}", self.key(), 0);
+                    self.event_sender
+                        .send(self.make_event("LoginCompleted", ""))
+                        .await
+                        .unwrap();
                 }
             }
             OnRspQryInstrumentCommissionRate(ref p) => {
@@ -258,6 +369,22 @@ impl Trader {
                 }
                 if p.b_is_last {}
             }
+            OnRtnOrder(ref p) => {
+                if let Some(order) = &p.p_order {
+                    let o = OrderRow::from(order);
+                    let k = o.key();
+                    if let Some(p) = self.cta.orders.get_mut(&k) {
+                        *p = o;
+                    } else {
+                        self.cta.orders.insert(k.clone(), o);
+                    }
+                    self.event_sender
+                        .send(self.make_event("Order", &k))
+                        .await
+                        .unwrap();
+                }
+            }
+            OnRtnTrade(ref p) => if let Some(trade) = &p.p_trade {},
             _ => {}
         }
     }
