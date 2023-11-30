@@ -44,6 +44,9 @@ pub struct CtpTradingAccount {
     pub status_description: String,
     pub orders: HashMap<String, OrderRow>,
     pub trades: HashMap<String, TradeRow>,
+    pub positions: HashMap<String, PositionRow>,
+    pub position_details: HashMap<String, PositionDetailRow>,
+    pub instruments: HashMap<String, InstrumentRow>,
 }
 
 pub struct Trader {
@@ -278,8 +281,13 @@ impl Trader {
                 }
             }
             OnRspQryInvestorPositionDetail(ref detail) => {
-                if let Some(_d) = detail.p_investor_position_detail {
-                    // info!("d={:?}", d);
+                if let Some(d) = &detail.p_investor_position_detail {
+                    let p = PositionDetailRow::from(d);
+                    if let Some(v) = self.cta.position_details.get_mut(&p.key()) {
+                        *v = p;
+                    } else {
+                        self.cta.position_details.insert(p.key(), p);
+                    }
                 }
                 if detail.b_is_last {
                     info!("{} 查询持仓明细完成", self.key());
@@ -294,8 +302,13 @@ impl Trader {
                 }
             }
             OnRspQryInvestorPosition(ref p) => {
-                if let Some(_p) = p.p_investor_position {
-                    // info!("pos={:?}", p);
+                if let Some(p) = &p.p_investor_position {
+                    let p = PositionRow::from(p);
+                    if let Some(v) = self.cta.positions.get_mut(&p.key()) {
+                        *v = p;
+                    } else {
+                        self.cta.positions.insert(p.key(), p);
+                    }
                 }
                 if p.b_is_last {
                     info!("{} 查询持仓完成", self.key());
@@ -308,7 +321,14 @@ impl Trader {
                 }
             }
             OnRspQryInstrument(ref p) => {
-                if let Some(_instrument) = p.p_instrument {}
+                if let Some(instrument) = &p.p_instrument {
+                    let instrument = InstrumentRow::from(instrument);
+                    if let Some(v) = self.cta.instruments.get_mut(&instrument.key()) {
+                        *v = instrument;
+                    } else {
+                        self.cta.instruments.insert(instrument.key(), instrument);
+                    }
+                }
                 if p.b_is_last {
                     // 查询行情
                     info!("{} 查询合约完成", self.key());
@@ -353,7 +373,14 @@ impl Trader {
                 }
             }
             OnRspQryTrade(ref p) => {
-                if let Some(_trade) = p.p_trade {}
+                if let Some(trade) = &p.p_trade {
+                    let trade = TradeRow::from(trade);
+                    if let Some(v) = self.cta.trades.get_mut(&trade.key()) {
+                        *v = trade;
+                    } else {
+                        self.cta.trades.insert(trade.key(), trade);
+                    }
+                }
                 if p.b_is_last {
                     info!("{} 查询成交明细完成 l={}", self.key(), 0);
                     self.event_sender
@@ -384,7 +411,21 @@ impl Trader {
                         .unwrap();
                 }
             }
-            OnRtnTrade(ref p) => if let Some(trade) = &p.p_trade {},
+            OnRtnTrade(ref p) => {
+                if let Some(trade) = &p.p_trade {
+                    let trade = TradeRow::from(trade);
+                    let k = trade.key();
+                    if let Some(v) = self.cta.trades.get_mut(&k) {
+                        *v = trade;
+                    } else {
+                        self.cta.trades.insert(trade.key(), trade);
+                    }
+                    self.event_sender
+                        .send(self.make_event("Trade", &k))
+                        .await
+                        .unwrap();
+                }
+            }
             _ => {}
         }
     }

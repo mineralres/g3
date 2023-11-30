@@ -37,6 +37,31 @@ const items: MenuProps['items'] = [
 				key: 'order-list',
 				icon: <AccountBookOutlined />,
 			},
+			{
+				label: <Link to={"instrument"}>合约列表</Link>,
+				key: 'instrument',
+				icon: <AccountBookOutlined />,
+			},
+			{
+				label: <Link to={"market-data"}>行情报表</Link>,
+				key: 'market-data',
+				icon: <AccountBookOutlined />,
+			},
+			{
+				label: <Link to={"position"}>持仓列表</Link>,
+				key: 'position',
+				icon: <AccountBookOutlined />,
+			},
+			{
+				label: <Link to={"position-detail"}>持仓明细</Link>,
+				key: 'position-detail',
+				icon: <AccountBookOutlined />,
+			},
+			{
+				label: <Link to={"trade"}>成交明细</Link>,
+				key: 'trade',
+				icon: <AccountBookOutlined />,
+			},
 		]
 
 	},

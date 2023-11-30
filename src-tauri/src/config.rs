@@ -17,11 +17,34 @@ pub struct TradeRow {
     pub broker_id: String,
     pub account: String,
     pub trade_id: String,
+    pub exchange: String,
     pub symbol: String,
     pub direction: i32,
     pub offset: i32,
     pub price: f64,
-    pub volume: f64,
+    pub volume: i32,
+}
+impl TradeRow {
+    pub fn key(&self) -> String {
+        format!("{}:{}:{}", self.exchange, self.symbol, self.trade_id)
+    }
+}
+impl From<&CThostFtdcTradeField> for TradeRow {
+    fn from(value: &CThostFtdcTradeField) -> Self {
+        Self {
+            broker_id: ascii_cstr_to_str_i8(&value.BrokerID).unwrap().to_string(),
+            account: ascii_cstr_to_str_i8(&value.InvestorID).unwrap().to_string(),
+            trade_id: ascii_cstr_to_str_i8(&value.TradeID).unwrap().to_string(),
+            exchange: ascii_cstr_to_str_i8(&value.ExchangeID).unwrap().to_string(),
+            symbol: ascii_cstr_to_str_i8(&value.InstrumentID)
+                .unwrap()
+                .to_string(),
+            direction: value.Direction as i32,
+            offset: value.OffsetFlag as i32,
+            price: value.Price,
+            volume: value.Volume,
+        }
+    }
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
@@ -41,6 +64,7 @@ pub struct OrderRow {
     pub volume_traded: i32,
     pub status: i32,
     pub status_description: String,
+    pub insert_time: String,
 }
 impl OrderRow {
     pub fn key(&self) -> String {
@@ -66,6 +90,97 @@ impl From<&CThostFtdcOrderField> for OrderRow {
             volume_traded: o.VolumeTraded,
             status: o.OrderStatus as i32,
             status_description: gb18030_cstr_to_str_i8(&o.StatusMsg).to_string(),
+            insert_time: gb18030_cstr_to_str_i8(&o.InsertTime).to_string(),
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+pub struct InstrumentRow {
+    pub exchange: String,
+    pub symbol: String,
+    pub name: String,
+}
+impl InstrumentRow {
+    pub fn key(&self) -> String {
+        format!("{}:{}", self.exchange, self.symbol)
+    }
+}
+
+impl From<&CThostFtdcInstrumentField> for InstrumentRow {
+    fn from(value: &CThostFtdcInstrumentField) -> Self {
+        Self {
+            exchange: ascii_cstr_to_str_i8(&value.ExchangeID).unwrap().to_string(),
+            symbol: ascii_cstr_to_str_i8(&value.InstrumentID)
+                .unwrap()
+                .to_string(),
+            name: gb18030_cstr_to_str_i8(&value.InstrumentName).to_string(),
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+pub struct MarketDataRow {}
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+pub struct PositionDetailRow {
+    pub exchange: String,
+    pub symbol: String,
+    pub direction: i32,
+    pub volume: i32,
+    pub volume_closed: i32,
+    pub trade_id: String,
+}
+impl PositionDetailRow {
+    pub fn key(&self) -> String {
+        format!("{}:{}:{}", self.exchange, self.symbol, self.trade_id)
+    }
+}
+impl From<&CThostFtdcInvestorPositionDetailField> for PositionDetailRow {
+    fn from(value: &CThostFtdcInvestorPositionDetailField) -> Self {
+        Self {
+            exchange: ascii_cstr_to_str_i8(&value.ExchangeID).unwrap().to_string(),
+            symbol: ascii_cstr_to_str_i8(&value.InstrumentID)
+                .unwrap()
+                .to_string(),
+            direction: value.Direction as i32,
+            volume: value.Volume,
+            volume_closed: value.CloseVolume,
+            trade_id: ascii_cstr_to_str_i8(&value.TradeID).unwrap().to_string(),
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+pub struct PositionRow {
+    pub broker_id: String,
+    pub account: String,
+    pub exchange: String,
+    pub symbol: String,
+    pub position: i32,
+    pub direction: i32,
+    pub open_cost: f64,
+    pub open_amount: f64,
+    pub open_volume: i32,
+}
+impl PositionRow {
+    pub fn key(&self) -> String {
+        format!("{}:{}:{}", self.exchange, self.symbol, self.direction)
+    }
+}
+impl From<&CThostFtdcInvestorPositionField> for PositionRow {
+    fn from(value: &CThostFtdcInvestorPositionField) -> Self {
+        Self {
+            broker_id: ascii_cstr_to_str_i8(&value.BrokerID).unwrap().to_string(),
+            account: ascii_cstr_to_str_i8(&value.InvestorID).unwrap().to_string(),
+            exchange: ascii_cstr_to_str_i8(&value.ExchangeID).unwrap().to_string(),
+            symbol: ascii_cstr_to_str_i8(&value.InstrumentID)
+                .unwrap()
+                .to_string(),
+            position: value.Position,
+            direction: value.PosiDirection as i32,
+            open_cost: value.OpenCost,
+            open_amount: value.OpenAmount,
+            open_volume: value.OpenVolume,
         }
     }
 }
