@@ -5,6 +5,7 @@ import { Outlet, Link, useNavigate } from "react-router-dom";
 import { emit, listen } from '@tauri-apps/api/event';
 import { appWindow, WebviewWindow } from '@tauri-apps/api/window';
 import { ExclamationCircleFilled, } from '@ant-design/icons';
+import { ask } from '@tauri-apps/api/dialog';
 import "./account.css";
 
 const { Option } = Select;
@@ -37,7 +38,9 @@ const AccountCard = (props: any) => {
 		<td>{account}</td>
 		<td>{equity}</td>
 		<td>{i_badge(status)}</td>
-		<td><Button type="link" onClick={() => {
+		<td><Button type="link" onClick={async () => {
+			const yes = await ask('Are you sure?', 'Tauri');
+			console.log("sure ", yes);
 			let title = "确认删除?";
 			confirm({
 				title,

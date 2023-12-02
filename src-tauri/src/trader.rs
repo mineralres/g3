@@ -51,6 +51,7 @@ pub struct CtpTradingAccount {
 
 pub struct Trader {
     pub conf: TradingAccount,
+    pub broker: TradingBroker,
     pub cta: CtpTradingAccount,
     pub api: Box<CThostFtdcTraderApi>,
     pub exit_sender: Option<tokio::sync::oneshot::Sender<String>>,
@@ -59,7 +60,11 @@ pub struct Trader {
 }
 
 impl Trader {
-    pub fn init(conf: TradingAccount, es: tokio::sync::mpsc::Sender<CtaEvent>) -> Arc<Mutex<Self>> {
+    pub fn init(
+        conf: TradingAccount,
+        broker: TradingBroker,
+        es: tokio::sync::mpsc::Sender<CtaEvent>,
+    ) -> Arc<Mutex<Self>> {
         let conf1 = conf.clone();
         let (exit_sender, mut exit_receiver) = oneshot::channel::<String>();
         let broker_id = conf.broker_id;
@@ -98,6 +103,7 @@ impl Trader {
             exit_sender: Some(exit_sender),
             request_id: 10,
             event_sender: es,
+            broker,
         };
         let trader = Arc::new(Mutex::new(trader));
         let t1 = Arc::clone(&trader);
@@ -322,7 +328,9 @@ impl Trader {
             }
             OnRspQryInstrument(ref p) => {
                 if let Some(instrument) = &p.p_instrument {
-                    let instrument = InstrumentRow::from(instrument);
+                    let mut instrument = InstrumentRow::from(instrument);
+                    instrument.broker_id = self.conf.broker_id.clone();
+                    instrument.account = self.conf.account.clone();
                     if let Some(v) = self.cta.instruments.get_mut(&instrument.key()) {
                         *v = instrument;
                     } else {

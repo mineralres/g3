@@ -154,6 +154,14 @@ pub async fn default_account(
 }
 
 #[tauri::command]
+pub async fn default_broker(
+    _window: tauri::Window,
+    _database: tauri::State<'_, StateTpye>,
+) -> Result<TradingBroker, String> {
+    Ok(TradingBroker::default())
+}
+
+#[tauri::command]
 pub async fn add_account(
     _window: tauri::Window,
     account: TradingAccount,
@@ -199,6 +207,59 @@ pub async fn delete_account(
     }
     db.sync_traders().await;
     Ok(())
+}
+
+#[tauri::command]
+pub async fn set_broker(
+    _window: tauri::Window,
+    broker: TradingBroker,
+    db: tauri::State<'_, StateTpye>,
+) -> Result<(), String> {
+    info!("set broker = {:?}", broker);
+    if broker.broker_id.len() == 0 {
+        return Err("broker_id不能为空".to_string());
+    }
+    let mut db = db.lock().await;
+    {
+        let conf = &mut db.conf;
+        if let Some(tb) = conf
+            .brokers
+            .iter_mut()
+            .find(|b| b.broker_id == broker.broker_id)
+        {
+            *tb = broker;
+        } else {
+            conf.brokers.push(broker);
+        }
+        conf.save(G3Config::default_path()).unwrap();
+    }
+    db.sync_traders().await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn delete_broker(
+    _window: tauri::Window,
+    broker_id: String,
+    db: tauri::State<'_, StateTpye>,
+) -> Result<(), String> {
+    info!("delete broker = [{}]", broker_id);
+    let mut db = db.lock().await;
+    {
+        let conf = &mut db.conf;
+        conf.brokers.retain(|b| !(b.broker_id == broker_id));
+        conf.save(G3Config::default_path()).unwrap();
+    }
+    db.sync_traders().await;
+    Ok(())
+}
+#[tauri::command]
+pub async fn broker_list(
+    _window: tauri::Window,
+    db: tauri::State<'_, StateTpye>,
+) -> Result<Vec<TradingBroker>, String> {
+    let db = db.lock().await;
+    Ok(db.conf.brokers.clone())
 }
 
 #[tauri::command]

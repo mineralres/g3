@@ -97,9 +97,13 @@ impl From<&CThostFtdcOrderField> for OrderRow {
 
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
 pub struct InstrumentRow {
+    pub broker_id: String,
+    pub account: String,
     pub exchange: String,
     pub symbol: String,
     pub name: String,
+    pub volume_multiple: i32,
+    pub price_tick: f64,
 }
 impl InstrumentRow {
     pub fn key(&self) -> String {
@@ -110,11 +114,15 @@ impl InstrumentRow {
 impl From<&CThostFtdcInstrumentField> for InstrumentRow {
     fn from(value: &CThostFtdcInstrumentField) -> Self {
         Self {
+            broker_id: "".into(),
+            account: "".into(),
             exchange: ascii_cstr_to_str_i8(&value.ExchangeID).unwrap().to_string(),
             symbol: ascii_cstr_to_str_i8(&value.InstrumentID)
                 .unwrap()
                 .to_string(),
             name: gb18030_cstr_to_str_i8(&value.InstrumentName).to_string(),
+            volume_multiple: value.VolumeMultiple,
+            price_tick: value.PriceTick,
         }
     }
 }
@@ -207,8 +215,29 @@ pub struct TradingAccount {
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
+pub struct TradingBroker {
+    pub broker_id: String,
+    pub name: String,
+    pub md_fronts: Vec<String>,
+    pub trade_fronts: Vec<String>,
+    pub query_fronts: Vec<String>,
+    pub user_product_info: String,
+    pub auth_code: String,
+    pub app_id: String,
+    pub route_type: String,
+    pub money_password: String,
+    pub fens_trade_front: String,
+    pub fens_md_front: String,
+    pub terminal_info: String,
+    pub hd_serial: String,
+    pub inner_ip_address: String,
+    pub mac_address: String,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
 pub struct G3Config {
     pub accounts: Vec<TradingAccount>,
+    pub brokers: Vec<TradingBroker>,
 }
 
 impl G3Config {

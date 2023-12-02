@@ -29,10 +29,26 @@ impl Database {
             }
             true
         }) {
-            let key = format!("{}:{}", ta.broker_id, ta.account);
-            if !self.traders.contains_key(&key) {
-                let trader = trader::Trader::init(ta.clone(), self.cta_event_sender.clone());
-                self.traders.insert(key, trader);
+            let broker = self
+                .conf
+                .brokers
+                .iter()
+                .find(|b| b.broker_id == ta.broker_id);
+            if let Some(broker) = broker {
+                let key = format!("{}:{}", ta.broker_id, ta.account);
+                if !self.traders.contains_key(&key) {
+                    let trader = trader::Trader::init(
+                        ta.clone(),
+                        broker.clone(),
+                        self.cta_event_sender.clone(),
+                    );
+                    self.traders.insert(key, trader);
+                }
+            } else {
+                error!(
+                    "{}:{} 没有找到经纪商[broker_id={}]",
+                    ta.broker_id, ta.account, ta.broker_id
+                );
             }
         }
         let delete_list = self
@@ -164,6 +180,7 @@ impl Database {
             for (_, t) in t.cta.instruments.iter() {
                 v.push(t.clone());
             }
+            break;
         }
         v
     }

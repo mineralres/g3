@@ -11,6 +11,23 @@ const { SubMenu } = Menu;
 
 const items: MenuProps['items'] = [
 	{
+		label: "经纪公司",
+		key: 'broker',
+		icon: <AccountBookOutlined />,
+		children: [
+			{
+				label: <Link to={"broker"}>经纪商列表</Link>,
+				key: 'broker-list',
+				icon: <AccountBookOutlined />,
+			},
+			{
+				label: "添加经纪商",
+				key: 'add-new-broker',
+				icon: <PlusSquareOutlined />,
+			},
+		]
+	},
+	{
 		label: "账号",
 		key: 'account',
 		icon: <AccountBookOutlined />,
@@ -99,7 +116,7 @@ export default () => {
 	});
 
 	const onClick: MenuProps['onClick'] = ({ item, key, keyPath, domEvent }) => {
-		if (key == "add-new-account") {
+		if (key == "add-new-account" || key == "add-new-broker") {
 			emit(key);
 		}
 		// setCurrent(key);

@@ -17,6 +17,7 @@ import MarketData from './routes/market_data';
 import PositionDetail from './routes/position_detail';
 import Position from './routes/position';
 import Trade from './routes/trade';
+import Broker from './routes/broker';
 
 import { invoke } from '@tauri-apps/api/tauri';
 import { FloatButton, Modal } from 'antd';
@@ -66,6 +67,10 @@ const router = createBrowserRouter([
       {
         path: "trade",
         element: <Trade></Trade>,
+      },
+      {
+        path: "broker",
+        element: <Broker></Broker>,
       },
     ],
   },

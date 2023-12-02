@@ -43,11 +43,25 @@ async fn main() {
         log_sender: std::sync::Mutex::new(log_sender),
     });
 
+    let i_timer = || (fmt::time::ChronoLocal::new("%Y-%m-%dT%H:%M:%S".to_string()));
+
     let collector = tracing_subscriber::registry()
         .with(EnvFilter::from_default_env().add_directive(tracing::Level::TRACE.into()))
-        .with(fmt::Subscriber::new().with_writer(io::stdout))
-        .with(fmt::Subscriber::new().with_writer(non_blocking2))
-        .with(fmt::Subscriber::new().with_writer(non_blocking));
+        .with(
+            fmt::subscriber()
+                .with_timer(i_timer())
+                .with_writer(io::stdout),
+        )
+        .with(
+            fmt::Subscriber::new()
+                .with_timer(i_timer())
+                .with_writer(non_blocking2),
+        )
+        .with(
+            fmt::Subscriber::new()
+                .with_timer(i_timer())
+                .with_writer(non_blocking),
+        );
     tracing::collect::set_global_default(collector).expect("Unable to set a global collector");
 
     if std::env::var("RUST_LOG").is_err() {
@@ -106,7 +120,11 @@ async fn main() {
             position_rows,
             get_position_row,
             instrument_rows,
-            get_instrument_row
+            get_instrument_row,
+            set_broker,
+            delete_broker,
+            broker_list,
+            default_broker
         ])
         .on_window_event(|event| match event.event() {
             tauri::WindowEvent::CloseRequested { api, .. } => {
