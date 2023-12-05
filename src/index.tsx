@@ -9,7 +9,6 @@ import {
 import ErrorPage from "./error-page";
 import Root from "./routes/root";
 import Account from "./routes/account";
-import Trading from "./routes/trading";
 import Order from "./routes/order";
 import Log from "./routes/log";
 import Instrument from "./routes/instrument";
@@ -33,39 +32,31 @@ const router = createBrowserRouter([
         element: <Account></Account>,
       },
       {
-        path: "order",
+        path: "order-table",
         element: <Order></Order>,
       },
       {
-        path: "account",
+        path: "account-table",
         element: <Account></Account>,
       },
       {
-        path: "trading",
-        element: <Trading></Trading>
-      },
-      {
-        path: "log",
-        element: <Account></Account>,
-      },
-      {
-        path: "instrument",
+        path: "instrument-table",
         element: <Instrument></Instrument>,
       },
       {
-        path: "market-data",
+        path: "market-data-table",
         element: <MarketData></MarketData>,
       },
       {
-        path: "position-detail",
+        path: "position-detail-table",
         element: <PositionDetail></PositionDetail>,
       },
       {
-        path: "position",
+        path: "position-table",
         element: <Position></Position>,
       },
       {
-        path: "trade",
+        path: "trade-table",
         element: <Trade></Trade>,
       },
       {

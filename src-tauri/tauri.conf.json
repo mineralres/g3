@@ -62,6 +62,7 @@
         "resizable": true,
         "title": "g3",
         "width": 800,
+        "decorations": true,
         "visible": false
       },
       {

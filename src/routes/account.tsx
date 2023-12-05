@@ -7,6 +7,7 @@ import { appWindow, WebviewWindow } from '@tauri-apps/api/window';
 import { ExclamationCircleFilled, } from '@ant-design/icons';
 import { ask } from '@tauri-apps/api/dialog';
 import "./account.css";
+import broker from './broker';
 
 const { Option } = Select;
 const { confirm } = Modal;
@@ -29,31 +30,38 @@ const AccountCard = (props: any) => {
 			return <Badge status='error' text={`登陆失败(${status_description})`}></Badge>;
 		} else if (status == "LoginSucceeded") {
 			return <Badge status='success' text='登陆成功'></Badge>;
+		} else if (status == "LoginCompleted") {
+			return <Badge status='success' text='登陆完成'></Badge>;
 		}
 		return <Badge status='default' text='未连接'></Badge>;
 	}
+	const i_profit = (profit: number) => {
+		if (profit > 0) {
+			return <span style={{ color: "red" }}>{profit.toFixed(2)}</span>
+		} else if (profit < 0) {
+			return <span style={{ color: "green" }}>{profit.toFixed(2)}</span>
+		}
+		return <span >{profit.toFixed(1)}</span>
+	}
 
 	return <tr>
-		<td>{broker_id}</td>
+		<td>{props.broker_name}({props.front_group_name})</td>
 		<td>{account}</td>
-		<td>{equity}</td>
+		<td>{i_profit(props.position_profit)}</td>
+		<td>{i_profit(props.closed_profit)}</td>
+		<td>{equity.toFixed(2)}</td>
+		<td>{props.available.toFixed(0)}</td>
 		<td>{i_badge(status)}</td>
-		<td><Button type="link" onClick={async () => {
-			const yes = await ask('Are you sure?', 'Tauri');
-			console.log("sure ", yes);
-			let title = "确认删除?";
-			confirm({
-				title,
-				icon: <ExclamationCircleFilled />,
-				content: '删除账户',
-				onOk() {
+		<td>
+			<Button type="link" onClick={async () => {
+				props.handleEdit();
+			}}>修改</Button>
+			<Button type="link" onClick={async () => {
+				const yes = await ask('确认删除账户?', '删除');
+				if (yes) {
 					handleDelete(broker_id, account);
-				},
-				onCancel() {
-				},
-			});
-		}}>删除</Button></td>
-
+				}
+			}}>删除</Button></td>
 	</tr>
 }
 
@@ -61,6 +69,7 @@ export default () => {
 	const [messageApi, contextHolder] = message.useMessage();
 	const navigate = useNavigate();
 	const [accountList, setAccountList] = useState([]);
+	const [brokerList, setBrokerList] = useState([]);
 	const [isAddOpen, setIsAddOpen] = useState(false);
 	const [form] = Form.useForm();
 	useEffect(() => {
@@ -73,17 +82,24 @@ export default () => {
 		});
 		async function test_listen() {
 			const unlisten = await listen('add-new-account', (event: any) => {
-				console.log('on add-new-account');
-				if (!isAddOpen) {
+				invoke('broker_list').then(res => {
+					setBrokerList(res as any);
+					if (!isAddOpen) {
+						setIsAddOpen(true);
+					}
 					setIsAddOpen(true);
-				}
-				setIsAddOpen(true);
+				});
 			});
 			const unlisten2 = await listen('cta-event', (event: any) => {
 				console.log('account window: cta-event', event);
-				invoke('account_list').then(res => {
-					setAccountList(res as any);
-				});
+				if (event.tp !== "OnRtnOrder"
+					&& event.tp !== "OnRtnTrade"
+				) {
+					invoke('account_list').then(res => {
+						setAccountList(res as any);
+					});
+				}
+
 			});
 
 			return [unlisten, unlisten2];
@@ -95,10 +111,14 @@ export default () => {
 	}, []);
 	const onFinish = (values: any) => {
 		let account = form.getFieldsValue(true);
-		invoke('add_account', { account }).then(res => {
-			messageApi.info('添加成功');
-			invoke('account_list').then(res => {
-				setAccountList(res as any);
+		invoke('delete_account', { brokerId: account.broker_id, account: account.account }).then(res => {
+			invoke('add_account', { account }).then(res => {
+				invoke('account_list').then(res => {
+					setAccountList(res as any);
+				});
+			}).catch(err => {
+				console.log("add account err ", err)
+				messageApi.error(err);
 			});
 		}).catch(err => {
 			console.log("add account err ", err)
@@ -120,22 +140,49 @@ export default () => {
 	const tailLayout = {
 		wrapperCol: { offset: 8, span: 16 },
 	};
+	const getFrontGroup = (broker_id: String) => {
+		console.log("getFrontGroup ", broker_id);
+		for (let i = 0; i < brokerList.length; i++) {
+			let broker: any = brokerList[i];
+			if (broker.broker_id === broker_id) {
+				return broker.fronts;
+			}
+		}
+		return [];
+	}
 
 	return (
 		<div>
+			<div style={{ float: "right" }}>
+				<Button type="link" onClick={() => {
+					invoke('broker_list').then(res => {
+						setBrokerList(res as any);
+						if (!isAddOpen) {
+							setIsAddOpen(true);
+						}
+						setIsAddOpen(true);
+					});
+				}}>+添加账户</Button>
+			</div>
 			{contextHolder}
 			<table id="customers" style={{ width: '100%' }}>
 				<colgroup>
 					<col span={1} style={{ width: '10%' }}></col>
 					<col span={1} style={{ width: '10%' }}></col>
 					<col span={1} style={{ width: '10%' }}></col>
-					<col span={1} style={{ width: '20%' }}></col>
-					<col span={1} style={{ width: '50%' }}></col>
+					<col span={1} style={{ width: '10%' }}></col>
+					<col span={1} style={{ width: '10%' }}></col>
+					<col span={1} style={{ width: '10%' }}></col>
+					<col span={1} style={{ width: '10%' }}></col>
+					<col span={1} style={{ width: '10%' }}></col>
 				</colgroup>
 				<tr>
-					<th>BrokerId</th>
+					<th>经纪商</th>
 					<th>账号</th>
-					<th>权益</th>
+					<th>持仓盈亏</th>
+					<th>平仓盈亏</th>
+					<th>动态权益</th>
+					<th>可用资金</th>
 					<th>状态</th>
 					<th>操作</th>
 				</tr>
@@ -149,7 +196,19 @@ export default () => {
 					}).catch(err => {
 						messageApi.error(err);
 					});
-				}} key={index} {...e} > </AccountCard>)}
+				}}
+					handleEdit={() => {
+						invoke('broker_list').then(res => {
+							setBrokerList(res as any);
+							form.setFieldsValue(e);
+							if (!isAddOpen) {
+								setIsAddOpen(true);
+							}
+							setIsAddOpen(true);
+						});
+					}}
+
+					key={index} {...e} > </AccountCard>)}
 			</table>
 			<Modal title="添加账户" footer={null} open={isAddOpen} onOk={() => { setIsAddOpen(false); }} onCancel={() => { setIsAddOpen(false) }}>
 				<Form
@@ -160,24 +219,38 @@ export default () => {
 					style={{ maxWidth: 600 }}
 				>
 					<Form.Item name="broker_id" label="BrokerID" rules={[{ required: true }]}>
-						<Input />
+						<Select
+							placeholder="选择经纪商"
+						>
+							{
+								brokerList.map((b: any) => {
+									return <Option value={b.broker_id}>{b.name}</Option>
+								})
+							}
+						</Select>
+					</Form.Item>
+					<Form.Item
+						noStyle
+						shouldUpdate={(prevValues, currentValues) => prevValues.broker_id !== currentValues.broker_id}
+					>
+						{({ getFieldValue }) =>
+							<Form.Item name="front_group" label="front_group" rules={[{ required: true }]}>
+								<Select
+									placeholder="选择服务器"
+								>
+									{
+										getFrontGroup(form.getFieldValue("broker_id")).map((fg: any) => {
+											return <Option value={fg.id}>{fg.name}</Option>
+										})
+									}
+								</Select>
+							</Form.Item>
+						}
 					</Form.Item>
 					<Form.Item name="account" label="Account" rules={[{ required: true }]}>
 						<Input />
 					</Form.Item>
 					<Form.Item name="password" label="密码" rules={[{ required: true }]}>
-						<Input />
-					</Form.Item>
-					<Form.Item name="trade_front" label="交易服务器" rules={[{ required: true }]}>
-						<Input />
-					</Form.Item>
-					<Form.Item name="user_product_info" label="产品信息" rules={[{}]}>
-						<Input />
-					</Form.Item>
-					<Form.Item name="auth_code" label="授权码" rules={[{}]}>
-						<Input />
-					</Form.Item>
-					<Form.Item name="app_id" label="AppID" rules={[{}]}>
 						<Input />
 					</Form.Item>
 					<Form.Item {...tailLayout}>

@@ -1,9 +1,10 @@
 use crate::config::*;
+use crate::db::ta_key;
 use bincode::{Decode, Encode};
 use ctp_futures::trader_api::*;
 use ctp_futures::*;
 use futures::StreamExt;
-use log::{info, warn};
+use log::{error, info, warn};
 use rust_share_util::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -12,7 +13,7 @@ use std::sync::Arc;
 use tokio::sync::oneshot;
 use tokio::sync::Mutex;
 
-#[derive(Decode, Encode, Debug, Clone, Serialize, Deserialize)]
+#[derive(Decode, Encode, Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum CtaStatus {
     UnKown,
     Connected,
@@ -21,6 +22,7 @@ pub enum CtaStatus {
     AuthenticateSucceeded,
     LoginFailed,
     LoginSucceeded,
+    LoginCompleted,
 }
 
 impl Default for CtaStatus {
@@ -59,22 +61,33 @@ pub struct Trader {
     request_id: i32,
 }
 
+#[derive(Debug, derive_more::Display, derive_more::From)]
+pub enum Error {
+    FrontGroupNotFound,
+}
+
 impl Trader {
     pub fn init(
         conf: TradingAccount,
         broker: TradingBroker,
         es: tokio::sync::mpsc::Sender<CtaEvent>,
-    ) -> Arc<Mutex<Self>> {
+    ) -> Result<Arc<Mutex<Self>>, Error> {
         let conf1 = conf.clone();
         let (exit_sender, mut exit_receiver) = oneshot::channel::<String>();
         let broker_id = conf.broker_id;
         let account = conf.account;
         let ak = format!("{broker_id}:{account}");
-        let fens_trade_front = conf.fens_trade_front.as_str();
-        let trade_front = conf.trade_front.as_str();
-        let _auth_code = conf.auth_code.as_str();
-        let _user_product_info = conf.user_product_info.as_str();
-        let _app_id = conf.app_id.as_str();
+        let fg = broker
+            .fronts
+            .iter()
+            .find(|fg| fg.id == conf.front_group)
+            .ok_or(Error::FrontGroupNotFound)?;
+
+        let fens_trade_front = fg.fens_trade_front.as_str();
+        let trade_front = fg.trade_front.as_str();
+        let _auth_code = broker.auth_code.as_str();
+        let _user_product_info = broker.user_product_info.as_str();
+        let _app_id = broker.app_id.as_str();
         let _password = conf.password.as_str();
         let flow_path = format!(".cache/ctp_futures_trade_flow_{}_{}//", broker_id, account);
         check_make_dir(&flow_path);
@@ -107,9 +120,16 @@ impl Trader {
         };
         let trader = Arc::new(Mutex::new(trader));
         let t1 = Arc::clone(&trader);
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
         tokio::spawn(async move {
             loop {
                 tokio::select! {
+                    _ = interval.tick() => {
+                        let mut trader = t1.lock().await;
+                        if trader.cta.status == CtaStatus::LoginCompleted {
+                            trader.req_query_trading_account();
+                        }
+                    }
                     msg = stream.next() => {
                         if let Some(msg) = msg {
                             let mut t1 = t1.lock().await;
@@ -128,7 +148,7 @@ impl Trader {
             }
             info!("[{ak}] exited loop");
         });
-        trader
+        Ok(trader)
     }
 
     fn key(&self) -> String {
@@ -157,16 +177,28 @@ impl Trader {
         }
     }
 
+    fn req_query_trading_account(&mut self) {
+        let broker_id = &self.conf.broker_id;
+        let account = &self.conf.account;
+        let mut req = CThostFtdcQryTradingAccountField::default();
+        set_cstr_from_str_truncate_i8(&mut req.BrokerID, broker_id);
+        set_cstr_from_str_truncate_i8(&mut req.InvestorID, account);
+        let request_id = self.get_request_id();
+        let result = self.api.req_qry_trading_account(&mut req, request_id);
+        if result != 0 {
+            error!("{} ReqQueryTradingAccount={}", self.key(), result);
+        }
+    }
+
     async fn handle_spi_msg(&mut self, spi_msg: &CThostFtdcTraderSpiOutput) {
         let conf = &self.conf;
         let broker_id = conf.broker_id.as_str();
         let account = conf.account.as_str();
-        let _fens_trade_front = conf.fens_trade_front.as_str();
-        let _trade_front = conf.trade_front.as_str();
-        let auth_code = conf.auth_code.as_str();
-        let user_product_info = conf.user_product_info.as_str();
-        let app_id = conf.app_id.as_str();
+        let auth_code = self.broker.auth_code.as_str();
+        let user_product_info = self.broker.user_product_info.as_str();
+        let app_id = self.broker.app_id.as_str();
         let password = conf.password.as_str();
+        let login_completed = || self.cta.status == CtaStatus::LoginCompleted;
         use ctp_futures::trader_api::CThostFtdcTraderSpiOutput::*;
         match spi_msg {
             OnFrontConnected(_p) => {
@@ -249,40 +281,44 @@ impl Trader {
                 let request_id = self.get_request_id();
                 let result = self.api.req_settlement_info_confirm(&mut req, request_id);
                 if result != 0 {
-                    info!("{} ReqSettlementInfoConfirm={}", self.key(), result);
+                    error!("{} ReqSettlementInfoConfirm={}", self.key(), result);
                 }
             }
             OnRspSettlementInfoConfirm(ref _p) => {
-                let mut req = CThostFtdcQryTradingAccountField::default();
-                set_cstr_from_str_truncate_i8(&mut req.BrokerID, broker_id);
-                set_cstr_from_str_truncate_i8(&mut req.InvestorID, account);
-                let request_id = self.get_request_id();
-                let result = self.api.req_qry_trading_account(&mut req, request_id);
-                if result != 0 {
-                    info!("{} ReqQueryTradingAccount={}", self.key(), result);
-                }
+                self.req_query_trading_account();
             }
+
             OnRspQryTradingAccount(ref p) => {
-                if let Some(taf) = p.p_trading_account {
-                    info!(
-                        "{} 查询账户资金完成.  account={} trading_day={:?} balance={}",
-                        self.key(),
-                        gb18030_cstr_to_str_i8(&taf.AccountID),
-                        gb18030_cstr_to_str_i8(&taf.TradingDay),
-                        taf.Balance
-                    );
+                if let Some(taf) = &p.p_trading_account {
+                    if !login_completed() {
+                        info!(
+                            "{} 查询账户资金完成.  account={} trading_day={:?} balance={}",
+                            self.key(),
+                            gb18030_cstr_to_str_i8(&taf.AccountID),
+                            gb18030_cstr_to_str_i8(&taf.TradingDay),
+                            taf.Balance
+                        );
+                    }
+                    self.cta.ta = *taf;
+                    self.event_sender
+                        .send(
+                            self.make_event("OnRspQryTradingAccount", &ta_key(broker_id, account)),
+                        )
+                        .await
+                        .unwrap();
                 }
-                if p.b_is_last {
+                if p.b_is_last && !login_completed() {
                     let mut req = CThostFtdcQryInvestorPositionDetailField::default();
                     set_cstr_from_str_truncate_i8(&mut req.BrokerID, broker_id);
                     set_cstr_from_str_truncate_i8(&mut req.InvestorID, account);
                     let request_id = self.get_request_id();
                     // flow control query limitation
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                     let result = self
                         .api
                         .req_qry_investor_position_detail(&mut req, request_id);
                     if result != 0 {
-                        info!("{} ReqQryInvestorPositionDetail = {:?}", self.key(), result);
+                        error!("{} ReqQryInvestorPositionDetail = {:?}", self.key(), result);
                     }
                 }
             }
@@ -295,15 +331,16 @@ impl Trader {
                         self.cta.position_details.insert(p.key(), p);
                     }
                 }
-                if detail.b_is_last {
+                if detail.b_is_last && !login_completed() {
                     info!("{} 查询持仓明细完成", self.key());
                     let mut req = CThostFtdcQryInvestorPositionField::default();
                     set_cstr_from_str_truncate_i8(&mut req.BrokerID, broker_id);
                     set_cstr_from_str_truncate_i8(&mut req.InvestorID, account);
                     let request_id = self.get_request_id();
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                     let result = self.api.req_qry_investor_position(&mut req, request_id);
                     if result != 0 {
-                        info!("{} ReqQueryPosition={}", self.key(), result);
+                        error!("{} ReqQueryPosition={}", self.key(), result);
                     }
                 }
             }
@@ -316,13 +353,14 @@ impl Trader {
                         self.cta.positions.insert(p.key(), p);
                     }
                 }
-                if p.b_is_last {
+                if p.b_is_last && !login_completed() {
                     info!("{} 查询持仓完成", self.key());
                     let mut req = CThostFtdcQryInstrumentField::default();
                     let request_id = self.get_request_id();
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                     let result = self.api.req_qry_instrument(&mut req, request_id);
                     if result != 0 {
-                        info!("{} ReqQryInstrument = {:?}", self.key(), result);
+                        error!("{} ReqQryInstrument = {:?}", self.key(), result);
                     }
                 }
             }
@@ -337,28 +375,30 @@ impl Trader {
                         self.cta.instruments.insert(instrument.key(), instrument);
                     }
                 }
-                if p.b_is_last {
+                if p.b_is_last && !login_completed() {
                     // 查询行情
                     info!("{} 查询合约完成", self.key());
                     let mut req = CThostFtdcQryDepthMarketDataField::default();
                     let request_id = self.get_request_id();
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                     let result = self.api.req_qry_depth_market_data(&mut req, request_id);
                     if result != 0 {
-                        info!("{} ReqQryDepthMarketData= {:?}", self.key(), result);
+                        error!("{} ReqQryDepthMarketData= {:?}", self.key(), result);
                     }
                 }
             }
             OnRspQryDepthMarketData(ref p) => {
                 if p.p_depth_market_data.is_some() {}
-                if p.b_is_last {
+                if p.b_is_last && !login_completed() {
                     info!("{} 查询行情完成 l={}", self.key(), 0);
                     let mut req = CThostFtdcQryOrderField::default();
                     set_cstr_from_str_truncate_i8(&mut req.BrokerID, broker_id);
                     set_cstr_from_str_truncate_i8(&mut req.InvestorID, account);
                     let request_id = self.get_request_id();
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                     let result = self.api.req_qry_order(&mut req, request_id);
                     if result != 0 {
-                        info!("{} ReqQryOrder = {:?}", result, self.key());
+                        error!("{} ReqQryOrder = {:?}", result, self.key());
                     }
                 }
             }
@@ -367,16 +407,16 @@ impl Trader {
                     let o = OrderRow::from(o);
                     self.cta.orders.insert(o.key(), o);
                 }
-
-                if p.b_is_last {
+                if p.b_is_last && !login_completed() {
                     info!("{} 查询委托完成 l={}", self.key(), self.cta.orders.len());
                     let mut req = CThostFtdcQryTradeField::default();
                     set_cstr_from_str_truncate_i8(&mut req.BrokerID, broker_id);
                     set_cstr_from_str_truncate_i8(&mut req.InvestorID, account);
                     let request_id = self.get_request_id();
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                     let result = self.api.req_qry_trade(&mut req, request_id);
                     if result != 0 {
-                        info!("{} ReqQryTrade = {:?}", self.key(), result);
+                        error!("{} ReqQryTrade = {:?}", self.key(), result);
                     }
                 }
             }
@@ -389,8 +429,9 @@ impl Trader {
                         self.cta.trades.insert(trade.key(), trade);
                     }
                 }
-                if p.b_is_last {
+                if p.b_is_last && !login_completed() {
                     info!("{} 查询成交明细完成 l={}", self.key(), 0);
+                    self.cta.status = CtaStatus::LoginCompleted;
                     self.event_sender
                         .send(self.make_event("LoginCompleted", ""))
                         .await
@@ -402,7 +443,7 @@ impl Trader {
                 if p.p_instrument_commission_rate.is_some() {
                     let _cr = p.p_instrument_commission_rate.unwrap();
                 }
-                if p.b_is_last {}
+                if p.b_is_last && !login_completed() {}
             }
             OnRtnOrder(ref p) => {
                 if let Some(order) = &p.p_order {
@@ -414,7 +455,7 @@ impl Trader {
                         self.cta.orders.insert(k.clone(), o);
                     }
                     self.event_sender
-                        .send(self.make_event("Order", &k))
+                        .send(self.make_event("OnRtnOrder", &k))
                         .await
                         .unwrap();
                 }
@@ -429,7 +470,7 @@ impl Trader {
                         self.cta.trades.insert(trade.key(), trade);
                     }
                     self.event_sender
-                        .send(self.make_event("Trade", &k))
+                        .send(self.make_event("OnRtnTrade", &k))
                         .await
                         .unwrap();
                 }

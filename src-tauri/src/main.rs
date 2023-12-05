@@ -4,7 +4,6 @@
 )]
 
 use log::info;
-use tauri::Manager;
 mod config;
 use config::*;
 use rust_share_util::*;
@@ -17,6 +16,7 @@ mod command;
 use command::*;
 mod db;
 use db::*;
+use tauri::{CustomMenuItem, Manager, Menu, Submenu};
 
 struct FrontLogWriter {
     log_sender: std::sync::Mutex<Sender<String>>,
@@ -72,14 +72,50 @@ async fn main() {
     let (cta_es, mut cta_er) = tokio::sync::mpsc::channel(1000);
     let db = Database::new(g3conf, cta_es);
     let state = StateTpye::new(db);
+    // here `"quit".to_string()` defines the menu item id, and the second parameter is the menu item label.
+    let submenu = Submenu::new(
+        "账号管理",
+        Menu::new()
+            .add_item(CustomMenuItem::new("broker-table".to_string(), "经纪商"))
+            .add_item(CustomMenuItem::new("account-table".to_string(), "交易账户")),
+    );
+    let submenu2 = Submenu::new(
+        "交易",
+        Menu::new()
+            .add_item(CustomMenuItem::new("order-table".to_string(), "报单列表"))
+            .add_item(CustomMenuItem::new(
+                "instrument-table".to_string(),
+                "合约列表",
+            ))
+            .add_item(CustomMenuItem::new(
+                "market-data-table".to_string(),
+                "行情列表",
+            ))
+            .add_item(CustomMenuItem::new(
+                "position-table".to_string(),
+                "持仓列表",
+            ))
+            .add_item(CustomMenuItem::new(
+                "position-detail-table".to_string(),
+                "持仓明细",
+            ))
+            .add_item(CustomMenuItem::new("trade-table".to_string(), "成交明细")),
+    );
+    let menu = Menu::new()
+        .add_submenu(submenu)
+        .add_submenu(submenu2)
+        .add_submenu(Submenu::new(
+            "File",
+            Menu::new().add_item(CustomMenuItem::new("copy", "Copy")),
+        ));
     tauri::Builder::default()
         .manage(state)
+        .menu(menu)
+        // .menu(tauri::Menu::os_default("g3"))
         .setup(|app| {
-            // listen to the `event-name` (emitted on any window)
             let _id = app.listen_global("event", |event| {
                 info!("got event-name with payload {:?}", event.payload());
             });
-            // emit the `event-name` event to all webview windows on the frontend
             app.emit_all(
                 "event-name",
                 Payload {
@@ -101,6 +137,17 @@ async fn main() {
                 while let Some(e) = cta_er.recv().await {
                     main_window.emit("cta-event", e).unwrap();
                 }
+            });
+            let main_window = app.get_window("main").unwrap();
+            main_window.clone().on_menu_event(move |event| {
+                main_window
+                    .emit(
+                        "window-menu-event",
+                        Payload {
+                            message: event.menu_item_id().into(),
+                        },
+                    )
+                    .unwrap()
             });
             Ok(())
         })

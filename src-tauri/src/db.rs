@@ -23,10 +23,6 @@ impl Database {
                 error!("[{}:{}] account不能为空", ta.broker_id, ta.account);
                 return false;
             }
-            if ta.trade_front.len() == 0 {
-                error!("[{}:{}] trade_front不能为空", ta.broker_id, ta.account);
-                return false;
-            }
             true
         }) {
             let broker = self
@@ -42,7 +38,14 @@ impl Database {
                         broker.clone(),
                         self.cta_event_sender.clone(),
                     );
-                    self.traders.insert(key, trader);
+                    match trader {
+                        Ok(trader) => {
+                            self.traders.insert(key, trader);
+                        }
+                        Err(e) => {
+                            error!("Init trader {}", e);
+                        }
+                    }
                 }
             } else {
                 error!(
@@ -206,6 +209,8 @@ impl Database {
                 let mut row = TradingAccountRow::default();
                 row.broker_id = a.broker_id.clone();
                 row.account = a.account.clone();
+                row.password = a.password.clone();
+                row.front_group = a.front_group.clone();
                 row
             })
             .collect_vec();
@@ -214,6 +219,24 @@ impl Database {
                 let trader = trader.lock().await;
                 row.status = trader.status();
                 row.status_description = trader.status_description();
+                row.equity = trader.cta.ta.Balance;
+                row.margin = trader.cta.ta.CurrMargin;
+                row.closed_profit = trader.cta.ta.CloseProfit;
+                row.position_profit = trader.cta.ta.PositionProfit;
+                row.available = trader.cta.ta.Available;
+                row.frozen_margin = trader.cta.ta.FrozenMargin;
+                row.frozen_commission = trader.cta.ta.FrozenCommission;
+                if let Some(b) = self
+                    .conf
+                    .brokers
+                    .iter()
+                    .find(|b| b.broker_id == trader.conf.broker_id)
+                {
+                    row.broker_name = b.name.clone();
+                    if let Some(fg) = b.fronts.iter().find(|fg| fg.id == row.front_group) {
+                        row.front_group_name = fg.name.clone();
+                    }
+                }
             }
         }
         v

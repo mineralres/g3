@@ -1,15 +1,27 @@
 use crate::trader::CtaStatus;
 use ctp_futures::*;
+use log::error;
 use rust_share_util::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
 pub struct TradingAccountRow {
     pub broker_id: String,
+    pub broker_name: String,
     pub account: String,
-    pub equity: f64,
+    pub password: String,
+    pub front_group: String,
+    pub front_group_name: String,
     pub status: CtaStatus,
     pub status_description: String,
+    pub equity: f64,
+    pub closed_profit: f64,
+    pub position_profit: f64,
+    pub float_profit: f64,
+    pub margin: f64,
+    pub frozen_margin: f64,
+    pub frozen_commission: f64,
+    pub available: f64,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
@@ -104,6 +116,8 @@ pub struct InstrumentRow {
     pub name: String,
     pub volume_multiple: i32,
     pub price_tick: f64,
+    pub product_type: i32,
+    pub expire_date: String,
 }
 impl InstrumentRow {
     pub fn key(&self) -> String {
@@ -123,6 +137,8 @@ impl From<&CThostFtdcInstrumentField> for InstrumentRow {
             name: gb18030_cstr_to_str_i8(&value.InstrumentName).to_string(),
             volume_multiple: value.VolumeMultiple,
             price_tick: value.PriceTick,
+            product_type: value.ProductClass as i32,
+            expire_date: ascii_cstr_to_str_i8(&value.ExpireDate).unwrap().to_string(),
         }
     }
 }
@@ -198,29 +214,24 @@ pub struct TradingAccount {
     pub broker_id: String,
     pub account: String,
     pub password: String,
-    pub md_front: String,
+    pub front_group: String,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+pub struct FrontGroup {
+    pub id: String,
+    pub name: String,
     pub trade_front: String,
+    pub md_front: String,
     pub query_front: String,
-    pub user_product_info: String,
-    pub auth_code: String,
-    pub app_id: String,
-    pub route_type: String,
-    pub money_password: String,
     pub fens_trade_front: String,
-    pub fens_md_front: String,
-    pub terminal_info: String,
-    pub hd_serial: String,
-    pub inner_ip_address: String,
-    pub mac_address: String,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone, Default)]
 pub struct TradingBroker {
     pub broker_id: String,
     pub name: String,
-    pub md_fronts: Vec<String>,
-    pub trade_fronts: Vec<String>,
-    pub query_fronts: Vec<String>,
+    pub fronts: Vec<FrontGroup>,
     pub user_product_info: String,
     pub auth_code: String,
     pub app_id: String,
@@ -244,8 +255,14 @@ impl G3Config {
     pub fn load(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let file = std::fs::File::open(path)?;
         let reader = std::io::BufReader::new(file);
-        let c = serde_json::from_reader(reader)?;
-        Ok(c)
+        let c = serde_json::from_reader(reader);
+        match c {
+            Ok(c) => Ok(c),
+            Err(e) => {
+                error!("e={}", e);
+                Err(Box::new(e))
+            }
+        }
     }
 
     pub fn save(&self, path: &str) -> Result<(), std::io::Error> {

@@ -1,36 +1,62 @@
 import { invoke } from '@tauri-apps/api/tauri';
-import { Card, Button, Modal, Form, Input, Select, Divider, message, Badge } from 'antd';
+import { Card, Button, Modal, Form, Input, Select, Divider, message, Badge, Space } from 'antd';
 import React, { useState, useEffect } from 'react'
 import { Outlet, Link, useNavigate } from "react-router-dom";
 import { emit, listen } from '@tauri-apps/api/event';
 import { appWindow, WebviewWindow } from '@tauri-apps/api/window';
-import { ExclamationCircleFilled, } from '@ant-design/icons';
+import { ExclamationCircleFilled, CloseOutlined } from '@ant-design/icons';
 import { ask } from '@tauri-apps/api/dialog';
 import "./account.css";
-
-const { Option } = Select;
-const { confirm } = Modal;
 
 const BrokerRow = (props: any) => {
     return <tr>
         <td>{props.broker_id}</td>
         <td>{props.name}</td>
+        <td>{props.user_product_info}</td>
+        <td>{props.auth_code}</td>
+        <td>{props.app_id}</td>
+        <td>
+            {props.fronts.map((e: any, index: number) => {
+                return <Card title={e.name} size='small'>
+                    {/* <p>
+                        <span>交易服务器</span>
+                        <span>{e.trade_front}</span>
+                    </p>
+                    <p>
+                        <span>交易服务器</span>
+                        <span>{e.trade_front}</span>
+                    </p>
+                    <p>
+                        <span>交易服务器</span>
+                        <span>{e.trade_front}</span>
+                    </p> */}
+                    <table>
+                        <tr>
+                            <td>交易服务器</td>
+                            <td>{e.trade_front}</td>
+                        </tr>
+                        <tr>
+                            <td>行情服务器</td>
+                            <td>{e.md_front}</td>
+                        </tr>
+                        <tr>
+                            <td>查询服务器</td>
+                            <td>{e.query_front}</td>
+                        </tr>
+                    </table>
+                </Card>
+            })}
+        </td>
         <td><Button type="link" onClick={async () => {
-            const yes = await ask('Are you sure?', 'Tauri');
-            console.log("sure ", yes);
-            let title = "确认删除?";
-            confirm({
-                title,
-                icon: <ExclamationCircleFilled />,
-                content: '删除经纪商',
-                onOk() {
+            props.handleEdit();
+        }}>修改</Button>
+            <Button type="link" onClick={async () => {
+                const yes = await ask('确定删除吗?', '删除');
+                if (yes) {
                     props.handleDelete(props.broker_id);
-                },
-                onCancel() {
-                },
-            });
-        }}>删除</Button></td>
-
+                }
+            }}>删除</Button>
+        </td>
     </tr>
 }
 
@@ -67,6 +93,7 @@ export default () => {
         }
     }, []);
     const onFinish = (values: any) => {
+        console.log("value", values);
         let broker = form.getFieldsValue(true);
         invoke('set_broker', { broker }).then(res => {
             messageApi.info('添加成功');
@@ -97,17 +124,31 @@ export default () => {
     return (
         <div>
             {contextHolder}
+            <div style={{ float: "right" }}>
+                <Button type="link" onClick={() => {
+                    if (!isAddOpen) {
+                        setIsAddOpen(true);
+                    }
+                    setIsAddOpen(true);
+                }}>+添加经纪商</Button>
+            </div>
             <table id="customers" style={{ width: '100%' }}>
                 <colgroup>
+                    <col span={1} style={{ width: '5%' }}></col>
+                    <col span={1} style={{ width: '5%' }}></col>
                     <col span={1} style={{ width: '10%' }}></col>
                     <col span={1} style={{ width: '10%' }}></col>
                     <col span={1} style={{ width: '10%' }}></col>
-                    <col span={1} style={{ width: '20%' }}></col>
-                    <col span={1} style={{ width: '50%' }}></col>
+                    <col span={1} style={{ width: '30%' }}></col>
                 </colgroup>
                 <tr>
                     <th>BrokerId</th>
                     <th>名称</th>
+                    <th>UserProductInfo</th>
+                    <th>AuthCode</th>
+                    <th>AppId</th>
+                    <th>服务器</th>
+                    <th>操作</th>
                 </tr>
                 {brokerList.map((e: any, index) => <BrokerRow handleDelete={(broker_id: string) => {
                     invoke('delete_broker', { brokerId: broker_id }).then(res => {
@@ -119,7 +160,13 @@ export default () => {
                     }).catch(err => {
                         messageApi.error(err);
                     });
-                }} key={index} {...e} > </BrokerRow>)}
+                }}
+                    handleEdit={() => {
+                        form.setFieldsValue(e);
+                        setIsAddOpen(true);
+                    }}
+
+                    key={index} {...e} > </BrokerRow>)}
             </table>
             <Modal title="添加经纪商" footer={null} open={isAddOpen} onOk={() => { setIsAddOpen(false); }} onCancel={() => { setIsAddOpen(false) }}>
                 <Form
@@ -135,18 +182,6 @@ export default () => {
                     <Form.Item name="name" label="名称" rules={[{ required: true }]}>
                         <Input />
                     </Form.Item>
-                    <Form.Item name="trade_fronts" label="交易服务器" rules={[{ required: true, type: "array" }]}>
-                        <Select mode="tags">
-                        </Select>
-                    </Form.Item>
-                    <Form.Item name="md_fronts" label="行情服务器" rules={[{ required: true, type: "array" }]}>
-                        <Select mode="tags" >
-                        </Select>
-                    </Form.Item>
-                    <Form.Item name="query_fronts" label="查询服务器" rules={[{ required: true, type: "array" }]}>
-                        <Select mode="tags" >
-                        </Select>
-                    </Form.Item>
                     <Form.Item name="user_product_info" label="产品信息" rules={[{}]}>
                         <Input />
                     </Form.Item>
@@ -156,6 +191,46 @@ export default () => {
                     <Form.Item name="app_id" label="AppID" rules={[{}]}>
                         <Input />
                     </Form.Item>
+                    <Form.List name="fronts">
+                        {(fields, { add, remove }) => (
+                            <div style={{ display: 'flex', rowGap: 16, flexDirection: 'column' }}>
+                                {fields.map((field) => (
+                                    <Card
+                                        size="small"
+                                        title={`服务器`}
+                                        key={field.key}
+                                        extra={
+                                            <CloseOutlined
+                                                onClick={() => {
+                                                    remove(field.name);
+                                                }}
+                                            />
+                                        }
+                                    >
+                                        <Form.Item label="ID" name={[field.name, 'id']}>
+                                            <Input />
+                                        </Form.Item>
+                                        <Form.Item label="名称" name={[field.name, 'name']}>
+                                            <Input />
+                                        </Form.Item>
+                                        <Form.Item label="交易服务器" name={[field.name, 'trade_front']}>
+                                            <Input />
+                                        </Form.Item>
+                                        <Form.Item label="行情服务器" name={[field.name, 'md_front']}>
+                                            <Input />
+                                        </Form.Item>
+                                        <Form.Item label="查询服务器" name={[field.name, 'query_front']}>
+                                            <Input />
+                                        </Form.Item>
+                                    </Card>
+                                ))}
+
+                                <Button type="dashed" onClick={() => add()} block>
+                                    + 添加服务器组
+                                </Button>
+                            </div>
+                        )}
+                    </Form.List>
                     <Form.Item {...tailLayout}>
                         <Button type="primary" htmlType="submit">
                             提交

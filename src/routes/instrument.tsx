@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/tauri';
 import { Card, Button, Modal, Form, Input, Select, Divider, Badge } from 'antd';
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { emit, listen } from '@tauri-apps/api/event';
 import { appWindow, WebviewWindow } from '@tauri-apps/api/window';
 import { ExclamationCircleFilled, } from '@ant-design/icons';
@@ -15,6 +15,42 @@ function truncateString(str: String, num: number) {
 }
 
 const InstrumentRow = (props: any) => {
+    const t_product = (pt: number) => {
+        if (pt == 49) {
+            return "期货";
+        } else if (pt == 50) {
+            return "期货期权";
+        } else if (pt == 51) {
+            return "组合";
+        } else if (pt == 52) {
+            return "即期";
+        } else if (pt == 53) {
+            return "期转现";
+        } else if (pt == 54) {
+            return "现货期权";
+        } else if (pt == 55) {
+            return "TAS合约";
+        } else if (pt == 56) {
+            return "金属指数";
+        }
+        return pt;
+        ///期货
+        // #define THOST_FTDC_PC_Futures '1'
+        // ///期货期权
+        // #define THOST_FTDC_PC_Options '2'
+        // ///组合
+        // #define THOST_FTDC_PC_Combination '3'
+        // ///即期
+        // #define THOST_FTDC_PC_Spot '4'
+        // ///期转现
+        // #define THOST_FTDC_PC_EFP '5'
+        // ///现货期权
+        // #define THOST_FTDC_PC_SpotOption '6'
+        // ///TAS合约
+        // #define THOST_FTDC_PC_TAS '7'
+        // ///金属指数
+        // #define THOST_FTDC_PC_MI 'I'
+    }
     return <tr>
         <td>{props.index + 1}</td>
         <td>{props.exchange}</td>
@@ -22,6 +58,8 @@ const InstrumentRow = (props: any) => {
         <td>{props.name}</td>
         <td>{props.volume_multiple}</td>
         <td>{props.price_tick}</td>
+        <td>{t_product(props.product_type)}</td>
+        <td>{props.expire_date}</td>
     </tr>
 }
 
@@ -67,6 +105,10 @@ export default () => {
                     <th>名称</th>
                     <th>合约乘数</th>
                     <th>最小变动</th>
+                    <th>品种类型</th>
+                    <th>最后日期</th>
+                    <th>保证金</th>
+                    <th>手续费</th>
                 </tr>
                 {instrumentList.map((e: any, index) => <InstrumentRow index={index} key={index} {...e} > </InstrumentRow>)}
             </table>

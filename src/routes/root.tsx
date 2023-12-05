@@ -6,41 +6,25 @@ import { AppstoreOutlined, AccountBookOutlined, SettingOutlined, PlusSquareOutli
 import type { MenuProps } from 'antd';
 import { Menu } from 'antd';
 import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom';
 const { SubMenu } = Menu;
 
 
 const items: MenuProps['items'] = [
 	{
-		label: "经纪公司",
-		key: 'broker',
-		icon: <AccountBookOutlined />,
-		children: [
-			{
-				label: <Link to={"broker"}>经纪商列表</Link>,
-				key: 'broker-list',
-				icon: <AccountBookOutlined />,
-			},
-			{
-				label: "添加经纪商",
-				key: 'add-new-broker',
-				icon: <PlusSquareOutlined />,
-			},
-		]
-	},
-	{
-		label: "账号",
+		label: "账号管理",
 		key: 'account',
 		icon: <AccountBookOutlined />,
 		children: [
 			{
-				label: <Link to={"account"}>账号列表</Link>,
-				key: 'account-list',
+				label: <Link to={"broker"}>经纪商</Link>,
+				key: 'broker-list',
 				icon: <AccountBookOutlined />,
 			},
 			{
-				label: "添加账号",
-				key: 'add-new-account',
-				icon: <PlusSquareOutlined />,
+				label: <Link to={"account"}>交易账号</Link>,
+				key: 'account-list',
+				icon: <AccountBookOutlined />,
 			},
 		]
 	},
@@ -111,9 +95,38 @@ const items: MenuProps['items'] = [
 ];
 
 export default () => {
-	const [current, setCurrent] = useState('account');
+	const navigate = useNavigate();
 	useEffect(() => {
+		async function test_listen() {
+			const unlisten = await listen('window-menu-event', (event: any) => {
+				const m = event.payload.message;
+				console.log("m", m);
+				if (m === 'broker-table') {
+					navigate('broker');
+				} else if (m === 'account-table') {
+					navigate('account-table');
+				} else if (m === 'order-table') {
+					navigate('order-table');
+				} else if (m === 'instrument-table') {
+					navigate('instrument-table');
+				} else if (m === 'trade-table') {
+					navigate('trade-table');
+				} else if (m === 'position-table') {
+					navigate('position-table');
+				} else if (m === 'position-detail-table') {
+					navigate('position-detail-table');
+				} else if (m === 'market-data-table') {
+					navigate('market-data-table');
+				}
+			});
+			return [unlisten];
+		}
+		const unlisten = test_listen();
+		return () => {
+			unlisten.then((ul) => ul.forEach((uf) => uf()));
+		}
 	});
+
 
 	const onClick: MenuProps['onClick'] = ({ item, key, keyPath, domEvent }) => {
 		if (key == "add-new-account" || key == "add-new-broker") {
@@ -123,7 +136,6 @@ export default () => {
 	};
 
 	return (<div>
-		<Menu onClick={onClick} mode="horizontal" items={items} ></Menu>
 		<Outlet></Outlet>
 	</div>);
 }

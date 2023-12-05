@@ -51,6 +51,7 @@ const OrderRow = (props: any) => {
 		<td>{props.volume_total_original - props.volume_traded}</td>
 		<td>{props.volume_traded}</td>
 		<td>{truncateString(props.status_description, 15)}</td>
+		<td>{props.insert_time}</td>
 	</tr>
 }
 
@@ -83,7 +84,7 @@ export default () => {
 			{contextHolder}
 			<table id="customers" style={{ width: '100%' }}>
 				<colgroup>
-					<col span={1} style={{ width: '10%', minWidth: "80px" }}></col>
+					<col span={1} style={{ width: '5%', minWidth: "80px" }}></col>
 					<col span={1} style={{ width: '5%', minWidth: "40px" }}></col>
 					<col span={1} style={{ width: '5%', textAlign: "center" }}></col>
 					<col span={1} style={{ width: '5%' }}></col>
